@@ -1,0 +1,155 @@
+# Garment Trading App - User Journeys
+
+---
+
+## 1. Customer Journeys
+
+### CJ1: Customer Onboarding
+- Open app
+- Enter mobile number
+- Verify OTP
+- Complete basic profile
+
+---
+
+### CJ2: Browse & Search Products
+- Land on homepage
+- Search using keyword (e.g., "checkered shirt")
+- Apply filters (category, fabric, price, etc.)
+- View product listing
+- Open product details
+
+---
+
+### CJ3: Create Order Request
+- Select product(s)
+- Enter required quantity
+- Add to cart
+- Review cart
+- Place order request
+
+---
+
+### CJ4: Handle Vendor Response
+- Receive notification
+- View response:
+  - Accepted
+  - Partially accepted
+  - Rejected
+- If partial:
+  - Accept updated quantity OR
+  - Cancel item
+- Confirm final order
+
+---
+
+### CJ5: Order History & Reorder
+- Open "My Orders"
+- View past orders
+- Select order
+- Reorder with modified quantity
+
+---
+
+## 2. Vendor Journeys
+
+### VJ1: Vendor Onboarding
+- Login via OTP
+- Add business details
+- Access dashboard
+
+---
+
+### VJ2: Upload & Manage Products
+- Add new product
+- Upload images
+- Add attributes & MOQ
+- Save product
+- Edit/delete product later
+
+---
+
+### VJ3: Receive Order Request
+- Get notification
+- Open order request
+- View:
+  - Product details
+  - Requested quantity
+
+---
+
+### VJ4: Respond to Order
+- Choose action:
+  - Accept
+  - Reject
+  - Alter quantity
+- Submit response
+
+---
+
+### VJ5: Track Orders
+- View all requests
+- Filter by:
+  - Pending
+  - Accepted
+  - Rejected
+
+---
+
+## 3. Admin Journeys
+
+### AJ1: Monitor Orders
+- View all orders
+- Apply filters
+- View detailed order info
+
+---
+
+### AJ2: Manage Users
+- View customer/vendor list
+- Activate / deactivate users
+
+---
+
+### AJ3: Manage Categories & Attributes
+- Add/edit categories
+- Define attributes (fabric, pattern, etc.)
+
+---
+
+### AJ4: Handle Exceptions
+- Identify delayed vendor responses
+- Resolve disputes
+- Intervene manually if needed
+
+---
+
+## 4. System Journeys (Background Processes)
+
+### SJ1: Order Splitting
+- Split customer order vendor-wise automatically
+
+---
+
+### SJ2: Notification Handling
+- Trigger notifications:
+  - Customer → Vendor (new order)
+  - Vendor → Customer (response)
+- Send reminders for pending responses
+
+---
+
+### SJ3: Timeout Handling
+- Detect no-response cases
+- Mark request as "No Response" after defined time
+
+---
+
+## 5. Critical Journeys (MVP Focus)
+
+- Customer search & browsing (CJ2)
+- Customer order creation (CJ3)
+- Vendor response (VJ4)
+- Order routing (SJ1)
+
+---

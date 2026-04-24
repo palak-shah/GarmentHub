@@ -21,9 +21,9 @@ export function Modal({ open, onClose, title, children }: ModalProps) {
     <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center">
       <div className="fixed inset-0 bg-black/40" onClick={onClose} />
       <div className="relative w-full max-w-lg rounded-t-2xl bg-white p-6 shadow-xl sm:rounded-2xl sm:m-4">
-        <div className="mb-4 flex items-center justify-between">
-          {title && <h3 className="text-lg font-semibold">{title}</h3>}
-          <button onClick={onClose} className="rounded-full p-1 hover:bg-gray-100">
+        <div className="mb-4 flex items-center gap-2">
+          {title && <h3 className="flex-1 text-lg font-semibold pr-2">{title}</h3>}
+          <button type="button" onClick={onClose} className="shrink-0 rounded-full p-1 hover:bg-gray-100" aria-label="Close">
             <X className="h-5 w-5" />
           </button>
         </div>

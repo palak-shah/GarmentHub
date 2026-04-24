@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { vendorApi } from '@/api/vendor.api';
+import { useAuthStore } from '@/store/authStore';
 import { Header } from '@/components/layout/Header';
 import { Badge } from '@/components/ui/Badge';
 import { PageSpinner } from '@/components/ui/Spinner';
@@ -7,9 +8,11 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { itemStatusConfig, formatDate, formatPrice } from '@/utils/formatters';
 
 export default function VendorOrderHistory() {
+  const userId = useAuthStore((s) => s.user?.id);
   const { data: items, isLoading } = useQuery({
-    queryKey: ['vendor-orders'],
+    queryKey: ['vendor-orders', userId],
     queryFn: () => vendorApi.getIncomingOrders(),
+    enabled: !!userId,
   });
 
   const completed = items?.filter((i) => i.status !== 'PENDING') || [];
@@ -18,7 +21,7 @@ export default function VendorOrderHistory() {
     <>
       <Header title="Order History" showBack />
       <div className="mx-auto max-w-4xl px-4 py-4">
-        {isLoading ? (
+        {!userId || isLoading ? (
           <PageSpinner />
         ) : completed.length === 0 ? (
           <EmptyState title="No order history" description="Completed orders will appear here" />
@@ -38,10 +41,24 @@ export default function VendorOrderHistory() {
                     </div>
                     <Badge className={statusCfg.color}>{statusCfg.label}</Badge>
                   </div>
-                  <div className="mt-2 flex gap-4 text-sm text-gray-600">
-                    <span>Requested: {item.requestedQty}</span>
-                    <span>Accepted: {item.acceptedQty ?? '—'}</span>
-                    {item.product.price && <span>{formatPrice(item.product.price)}/unit</span>}
+                  <div className="mt-3 space-y-1 rounded-lg bg-gray-50 px-3 py-2 text-sm">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <span className="text-gray-500">Requested: </span>
+                        <span className="font-semibold text-gray-900">{item.requestedQty} units</span>
+                      </div>
+                      {item.product.price && (
+                        <span className="text-xs text-gray-500">{formatPrice(item.product.price)}/unit</span>
+                      )}
+                    </div>
+                    {item.acceptedQty != null ? (
+                      <div>
+                        <span className="text-gray-500">Offered / accepted: </span>
+                        <span className="font-semibold text-gray-900">{item.acceptedQty} units</span>
+                      </div>
+                    ) : (
+                      <div className="text-xs text-gray-400">No accepted quantity (e.g. rejected line)</div>
+                    )}
                   </div>
                 </div>
               );

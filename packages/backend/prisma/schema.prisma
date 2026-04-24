@@ -47,11 +47,12 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  products      Product[]
-  brands        Brand[]
-  orders        Order[]
-  orderItems    OrderItem[]
-  notifications Notification[]
+  products                 Product[]
+  brands                   Brand[]
+  orders                   Order[]
+  orderItems               OrderItem[]
+  notifications            Notification[]
+  vendorCategoryAttributes VendorCategoryAttribute[]
 
   @@map("users")
 }
@@ -60,10 +61,46 @@ model Category {
   id        String   @id @default(cuid())
   name      String   @unique
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  products Product[]
+  products          Product[]
+  attributes        CategoryAttribute[]
+  vendorAttributes  VendorCategoryAttribute[]
 
   @@map("categories")
+}
+
+model CategoryAttribute {
+  id         String   @id @default(cuid())
+  categoryId String
+  name       String
+  sortOrder  Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@unique([categoryId, name])
+  @@index([categoryId])
+  @@map("category_attributes")
+}
+
+model VendorCategoryAttribute {
+  id         String   @id @default(cuid())
+  vendorId   String
+  categoryId String
+  name       String
+  sortOrder  Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  vendor   User     @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@unique([vendorId, categoryId, name])
+  @@index([vendorId])
+  @@index([categoryId])
+  @@map("vendor_category_attributes")
 }
 
 model Brand {
@@ -82,20 +119,21 @@ model Brand {
 }
 
 model Product {
-  id         String        @id @default(cuid())
-  vendorId   String
-  brandId    String
-  name       String
-  images     String[]
-  categoryId String
-  pattern    String        @default("")
-  fabric     String        @default("")
-  color      String        @default("")
-  price      Float?
-  moq        Int           @default(1)
-  status     ProductStatus @default(ACTIVE)
-  createdAt  DateTime      @default(now())
-  updatedAt  DateTime      @updatedAt
+  id              String        @id @default(cuid())
+  vendorId        String
+  brandId         String
+  name            String
+  images          String[]
+  categoryId      String
+  pattern         String        @default("")
+  fabric          String        @default("")
+  color           String        @default("")
+  attributeValues Json          @default("{}")
+  price           Float?
+  moq             Int           @default(1)
+  status          ProductStatus @default(ACTIVE)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
 
   vendor     User        @relation(fields: [vendorId], references: [id])
   brand      Brand       @relation(fields: [brandId], references: [id])

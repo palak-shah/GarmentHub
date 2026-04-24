@@ -31,9 +31,16 @@ export class AdminController {
     } catch (err) { next(err); }
   }
 
+  static async listCategories(_req: Request, res: Response, next: NextFunction) {
+    try {
+      const categories = await AdminService.listCategories();
+      success(res, categories);
+    } catch (err) { next(err); }
+  }
+
   static async createCategory(req: Request, res: Response, next: NextFunction) {
     try {
-      const category = await AdminService.createCategory(req.body.name);
+      const category = await AdminService.createCategory(req.body.name, req.body.attributes);
       created(res, category, 'Category created');
     } catch (err) { next(err); }
   }
@@ -49,6 +56,31 @@ export class AdminController {
     try {
       await AdminService.deleteCategory(req.params.id);
       success(res, null, 'Category deleted');
+    } catch (err) { next(err); }
+  }
+
+  static async createCategoryAttribute(req: Request, res: Response, next: NextFunction) {
+    try {
+      const row = await AdminService.createCategoryAttribute(
+        req.params.categoryId,
+        req.body.name,
+        req.body.sortOrder,
+      );
+      created(res, row, 'Attribute created');
+    } catch (err) { next(err); }
+  }
+
+  static async updateCategoryAttribute(req: Request, res: Response, next: NextFunction) {
+    try {
+      const row = await AdminService.updateCategoryAttribute(req.params.categoryId, req.params.attributeId, req.body);
+      success(res, row, 'Attribute updated');
+    } catch (err) { next(err); }
+  }
+
+  static async deleteCategoryAttribute(req: Request, res: Response, next: NextFunction) {
+    try {
+      await AdminService.deleteCategoryAttribute(req.params.categoryId, req.params.attributeId);
+      success(res, null, 'Attribute deleted');
     } catch (err) { next(err); }
   }
 }

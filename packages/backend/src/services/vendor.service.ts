@@ -27,10 +27,12 @@ export class VendorService {
       case 'REJECT':
         status = ItemStatus.REJECTED;
         break;
-      case 'ALTER':
+      case 'ALTER': {
+        const q = data.alteredQty!;
         status = ItemStatus.ALTERED;
-        acceptedQty = data.alteredQty!;
+        acceptedQty = q;
         break;
+      }
     }
 
     const updated = await prisma.orderItem.update({

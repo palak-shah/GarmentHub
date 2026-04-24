@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import { ensureUploadDirs, UPLOADS_ROOT } from './config/uploadPaths';
 import { env } from './config/env';
 import { errorHandler } from './middleware/errorHandler';
 import { authRoutes } from './routes/auth.routes';
@@ -8,12 +9,17 @@ import { orderRoutes } from './routes/order.routes';
 import { vendorRoutes } from './routes/vendor.routes';
 import { adminRoutes } from './routes/admin.routes';
 import { brandRoutes } from './routes/brand.routes';
+import { uploadRoutes } from './routes/upload.routes';
 
 const app = express();
 
+ensureUploadDirs();
+
 app.use(cors());
+app.use('/uploads', express.static(UPLOADS_ROOT));
+// Multipart uploads must run before express.json() (belt-and-suspenders for body parsing).
+app.use('/api/upload', uploadRoutes);
 app.use(express.json());
-app.use('/uploads', express.static('uploads'));
 
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });

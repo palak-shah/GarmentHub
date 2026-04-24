@@ -10,20 +10,23 @@ import { PageSpinner } from '@/components/ui/Spinner';
 
 export default function VendorDashboard() {
   const user = useAuthStore((s) => s.user);
+  const userId = user?.id;
   const navigate = useNavigate();
 
   const { data: products, isLoading: loadingProducts } = useQuery({
-    queryKey: ['vendor-products'],
+    queryKey: ['vendor-products', userId],
     queryFn: () => productApi.getMyProducts(),
+    enabled: !!userId,
   });
 
   const { data: orderItems, isLoading: loadingOrders } = useQuery({
-    queryKey: ['vendor-orders'],
+    queryKey: ['vendor-orders', userId],
     queryFn: () => vendorApi.getIncomingOrders(),
+    enabled: !!userId,
   });
 
   const pendingOrders = orderItems?.filter((i) => i.status === 'PENDING').length || 0;
-  const isLoading = loadingProducts || loadingOrders;
+  const isLoading = !userId || loadingProducts || loadingOrders;
 
   if (isLoading) return <><Header title="Dashboard" /><PageSpinner /></>;
 

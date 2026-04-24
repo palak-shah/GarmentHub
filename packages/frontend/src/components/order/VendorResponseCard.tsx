@@ -1,5 +1,6 @@
 import { Badge } from '@/components/ui/Badge';
 import { itemStatusConfig, formatPrice } from '@/utils/formatters';
+import { mediaUrl } from '@/utils/mediaUrl';
 import type { OrderItem } from '@/types';
 
 export function VendorResponseCard({ item }: { item: OrderItem }) {
@@ -10,7 +11,7 @@ export function VendorResponseCard({ item }: { item: OrderItem }) {
       <div className="flex gap-3">
         <div className="h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-gray-100">
           {item.product.images?.[0] ? (
-            <img src={item.product.images[0]} alt="" className="h-full w-full object-cover" />
+            <img src={mediaUrl(item.product.images[0])} alt="" className="h-full w-full object-cover" />
           ) : null}
         </div>
         <div className="flex-1 min-w-0">

@@ -14,9 +14,32 @@ export interface User {
   createdAt: string;
 }
 
+export interface CategoryAttribute {
+  id: string;
+  categoryId: string;
+  name: string;
+  sortOrder: number;
+}
+
 export interface Category {
   id: string;
   name: string;
+  attributes?: CategoryAttribute[];
+}
+
+/** Admin list: categories with default attributes */
+export interface AdminCategory extends Category {
+  attributes: CategoryAttribute[];
+}
+
+/** Vendor catalog: defaults + this vendor's extras */
+export interface VendorCatalogCategory {
+  id: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+  defaultAttributes: CategoryAttribute[];
+  vendorAttributes: CategoryAttribute[];
 }
 
 export interface Brand {
@@ -38,11 +61,14 @@ export interface Product {
   pattern: string;
   fabric: string;
   color: string;
+  attributeValues?: Record<string, string>;
+  displayAttributes?: { label: string; value: string }[];
   price?: number;
   moq: number;
   status: ProductStatus;
   vendor: { id: string; name: string; businessName?: string };
   createdAt: string;
+  updatedAt: string;
 }
 
 export interface OrderItem {

@@ -4,22 +4,26 @@ import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { Plus, Edit2, Trash2, CheckSquare, Square, X } from 'lucide-react';
 import { productApi } from '@/api/product.api';
+import { useAuthStore } from '@/store/authStore';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { PageSpinner } from '@/components/ui/Spinner';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { formatPrice } from '@/utils/formatters';
+import { mediaUrl } from '@/utils/mediaUrl';
 
 export default function VendorProductList() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const userId = useAuthStore((s) => s.user?.id);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [selectMode, setSelectMode] = useState(false);
 
   const { data: products, isLoading } = useQuery({
-    queryKey: ['vendor-products'],
+    queryKey: ['vendor-products', userId],
     queryFn: () => productApi.getMyProducts(),
+    enabled: !!userId,
   });
 
   const deleteMut = useMutation({
@@ -134,7 +138,7 @@ export default function VendorProductList() {
       )}
 
       <div className="mx-auto max-w-4xl px-4 py-4">
-        {isLoading ? (
+        {!userId || isLoading ? (
           <PageSpinner />
         ) : !products || products.length === 0 ? (
           <EmptyState
@@ -163,10 +167,12 @@ export default function VendorProductList() {
                       )}
                     </div>
                   )}
-                  <div className="h-16 w-16 shrink-0 overflow-hidden rounded-lg bg-gray-100">
-                    {product.images[0] ? (
-                      <img src={product.images[0]} alt="" className="h-full w-full object-cover" />
-                    ) : null}
+                  <div className="h-16 w-16 shrink-0 overflow-hidden rounded-lg bg-gray-100 ring-1 ring-gray-200/80">
+                    {(product.images ?? [])[0] ? (
+                      <img src={mediaUrl(product.images[0])} alt="" className="h-full w-full object-cover" />
+                    ) : (
+                      <div className="flex h-full items-center justify-center text-[10px] text-gray-400">—</div>
+                    )}
                   </div>
                   <div className="flex-1 min-w-0">
                     <h3 className="text-sm font-medium text-gray-900 truncate">{product.name}</h3>

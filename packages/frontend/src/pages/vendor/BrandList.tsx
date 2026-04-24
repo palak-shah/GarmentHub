@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { Plus, Edit2, Trash2, Check, X } from 'lucide-react';
 import { brandApi } from '@/api/brand.api';
+import { useAuthStore } from '@/store/authStore';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/Button';
 import { PageSpinner } from '@/components/ui/Spinner';
@@ -11,13 +12,15 @@ import type { Brand } from '@/types';
 
 export default function BrandList() {
   const queryClient = useQueryClient();
+  const userId = useAuthStore((s) => s.user?.id);
   const [newName, setNewName] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
 
   const { data: brands, isLoading } = useQuery({
-    queryKey: ['vendor-brands'],
+    queryKey: ['vendor-brands', userId],
     queryFn: () => brandApi.listMy(),
+    enabled: !!userId,
   });
 
   const createMut = useMutation({
@@ -84,7 +87,7 @@ export default function BrandList() {
           </Button>
         </div>
 
-        {isLoading ? (
+        {!userId || isLoading ? (
           <PageSpinner />
         ) : !brands || brands.length === 0 ? (
           <EmptyState

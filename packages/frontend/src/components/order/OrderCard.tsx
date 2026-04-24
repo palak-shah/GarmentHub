@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import { Badge } from '@/components/ui/Badge';
 import { orderStatusConfig, formatDate } from '@/utils/formatters';
+import { mediaUrl } from '@/utils/mediaUrl';
 import type { Order } from '@/types';
 
 export function OrderCard({ order }: { order: Order }) {
@@ -26,7 +27,7 @@ export function OrderCard({ order }: { order: Order }) {
           <div key={item.id} className="flex items-center gap-2 text-sm">
             <div className="h-8 w-8 shrink-0 overflow-hidden rounded bg-gray-100">
               {item.product.images?.[0] ? (
-                <img src={item.product.images[0]} alt="" className="h-full w-full object-cover" />
+                <img src={mediaUrl(item.product.images[0])} alt="" className="h-full w-full object-cover" />
               ) : null}
             </div>
             <span className="flex-1 truncate text-gray-700">{item.product.name}</span>

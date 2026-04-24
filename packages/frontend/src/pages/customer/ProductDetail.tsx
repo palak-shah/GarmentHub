@@ -1,14 +1,15 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { ShoppingCart, Store, Layers, Palette, Ruler, Tag } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ShoppingCart, Store, Layers, Palette, Ruler, Tag } from 'lucide-react';
 import { productApi } from '@/api/product.api';
 import { useCartStore } from '@/store/cartStore';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/Button';
 import { PageSpinner } from '@/components/ui/Spinner';
 import { formatPrice } from '@/utils/formatters';
+import { mediaUrl } from '@/utils/mediaUrl';
 
 export default function ProductDetail() {
   const { id } = useParams<{ id: string }>();
@@ -22,9 +23,32 @@ export default function ProductDetail() {
     enabled: !!id,
   });
 
+  useEffect(() => {
+    setActiveImage(0);
+  }, [id]);
+
+  useEffect(() => {
+    const len = product?.images?.length ?? 0;
+    if (!product || len <= 1) return;
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      const t = e.target as HTMLElement | null;
+      if (t?.closest('input, textarea, select, [contenteditable="true"]')) return;
+      e.preventDefault();
+      const last = len - 1;
+      if (e.key === 'ArrowLeft') setActiveImage((i) => Math.max(0, i - 1));
+      else setActiveImage((i) => Math.min(last, i + 1));
+    };
+
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [product?.id, product?.images?.length]);
+
   if (isLoading) return <PageSpinner />;
   if (!product) return null;
 
+  const images = product.images ?? [];
   const qty = parseInt(quantity) || 0;
 
   const handleAddToCart = () => {
@@ -43,21 +67,50 @@ export default function ProductDetail() {
       <div className="mx-auto max-w-4xl">
         {/* Image gallery */}
         <div className="relative aspect-square overflow-hidden bg-gray-100">
-          {product.images[activeImage] ? (
-            <img src={product.images[activeImage]} alt={product.name} className="h-full w-full object-cover" />
+          {images[activeImage] ? (
+            <img
+              src={mediaUrl(images[activeImage])}
+              alt={product.name}
+              className="h-full w-full object-cover"
+            />
           ) : (
             <div className="flex h-full items-center justify-center text-gray-400">No image</div>
           )}
+          {images.length > 1 && (
+            <>
+              <button
+                type="button"
+                onClick={() => setActiveImage((i) => Math.max(0, i - 1))}
+                disabled={activeImage <= 0}
+                className="absolute left-2 top-1/2 z-10 -translate-y-1/2 rounded-full bg-black/45 p-2.5 text-white shadow-sm hover:bg-black/60 disabled:pointer-events-none disabled:opacity-30"
+                aria-label="Previous image"
+              >
+                <ChevronLeft className="h-7 w-7" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveImage((i) => Math.min(images.length - 1, i + 1))}
+                disabled={activeImage >= images.length - 1}
+                className="absolute right-2 top-1/2 z-10 -translate-y-1/2 rounded-full bg-black/45 p-2.5 text-white shadow-sm hover:bg-black/60 disabled:pointer-events-none disabled:opacity-30"
+                aria-label="Next image"
+              >
+                <ChevronRight className="h-7 w-7" />
+              </button>
+              <div className="pointer-events-none absolute bottom-2 left-1/2 z-10 -translate-x-1/2 rounded-full bg-black/45 px-2.5 py-0.5 text-xs font-medium tabular-nums text-white">
+                {activeImage + 1} / {images.length}
+              </div>
+            </>
+          )}
         </div>
-        {product.images.length > 1 && (
+        {images.length > 1 && (
           <div className="flex gap-2 overflow-x-auto px-4 py-2">
-            {product.images.map((img, i) => (
+            {images.map((img, i) => (
               <button
                 key={i}
                 onClick={() => setActiveImage(i)}
                 className={`h-16 w-16 shrink-0 overflow-hidden rounded-lg border-2 ${i === activeImage ? 'border-primary-600' : 'border-transparent'}`}
               >
-                <img src={img} alt="" className="h-full w-full object-cover" />
+                <img src={mediaUrl(img)} alt="" className="h-full w-full object-cover" />
               </button>
             ))}
           </div>
@@ -93,33 +146,50 @@ export default function ProductDetail() {
                 </div>
               </div>
             )}
-            {product.fabric && (
-              <div className="flex items-center gap-2 rounded-lg bg-gray-50 p-3 text-sm">
-                <Ruler className="h-4 w-4 text-gray-400" />
-                <div>
-                  <div className="text-xs text-gray-500">Fabric</div>
-                  <div className="font-medium">{product.fabric}</div>
-                </div>
-              </div>
-            )}
-            {product.pattern && (
-              <div className="flex items-center gap-2 rounded-lg bg-gray-50 p-3 text-sm">
-                <Layers className="h-4 w-4 text-gray-400" />
-                <div>
-                  <div className="text-xs text-gray-500">Pattern</div>
-                  <div className="font-medium">{product.pattern}</div>
-                </div>
-              </div>
-            )}
-            {product.color && (
-              <div className="flex items-center gap-2 rounded-lg bg-gray-50 p-3 text-sm">
-                <Palette className="h-4 w-4 text-gray-400" />
-                <div>
-                  <div className="text-xs text-gray-500">Color</div>
-                  <div className="font-medium">{product.color}</div>
-                </div>
-              </div>
-            )}
+            {product.displayAttributes && product.displayAttributes.length > 0
+              ? product.displayAttributes.map((row, i) => (
+                  <div
+                    key={`${row.label}-${row.value}-${i}`}
+                    className="flex items-center gap-2 rounded-lg bg-gray-50 p-3 text-sm"
+                  >
+                    <Layers className="h-4 w-4 shrink-0 text-gray-400" />
+                    <div>
+                      <div className="text-xs text-gray-500">{row.label}</div>
+                      <div className="font-medium">{row.value}</div>
+                    </div>
+                  </div>
+                ))
+              : (
+                <>
+                  {product.fabric && (
+                    <div className="flex items-center gap-2 rounded-lg bg-gray-50 p-3 text-sm">
+                      <Ruler className="h-4 w-4 text-gray-400" />
+                      <div>
+                        <div className="text-xs text-gray-500">Fabric</div>
+                        <div className="font-medium">{product.fabric}</div>
+                      </div>
+                    </div>
+                  )}
+                  {product.pattern && (
+                    <div className="flex items-center gap-2 rounded-lg bg-gray-50 p-3 text-sm">
+                      <Layers className="h-4 w-4 text-gray-400" />
+                      <div>
+                        <div className="text-xs text-gray-500">Pattern</div>
+                        <div className="font-medium">{product.pattern}</div>
+                      </div>
+                    </div>
+                  )}
+                  {product.color && (
+                    <div className="flex items-center gap-2 rounded-lg bg-gray-50 p-3 text-sm">
+                      <Palette className="h-4 w-4 text-gray-400" />
+                      <div>
+                        <div className="text-xs text-gray-500">Color</div>
+                        <div className="font-medium">{product.color}</div>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
           </div>
 
           <div className="rounded-lg bg-yellow-50 p-3 text-sm text-yellow-800">

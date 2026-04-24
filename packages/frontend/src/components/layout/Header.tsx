@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, LogOut } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
+import { clearSessionQueryData } from '@/lib/sessionQueries';
 
 interface HeaderProps {
   title: string;
@@ -23,7 +24,11 @@ export function Header({ title, showBack, actions }: HeaderProps) {
         <h1 className="flex-1 text-lg font-semibold truncate">{title}</h1>
         {actions}
         <button
-          onClick={() => { logout(); navigate('/login'); }}
+          onClick={() => {
+            clearSessionQueryData();
+            logout();
+            navigate('/login');
+          }}
           className="rounded-full p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
           title="Logout"
         >

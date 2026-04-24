@@ -1,6 +1,7 @@
 import { Trash2 } from 'lucide-react';
 import { useCartStore } from '@/store/cartStore';
 import { formatPrice } from '@/utils/formatters';
+import { mediaUrl } from '@/utils/mediaUrl';
 import type { CartItem as CartItemType } from '@/types';
 
 export function CartItem({ item }: { item: CartItemType }) {
@@ -10,8 +11,8 @@ export function CartItem({ item }: { item: CartItemType }) {
   return (
     <div className="flex gap-3 rounded-xl bg-white p-3 shadow-sm">
       <div className="h-20 w-20 shrink-0 overflow-hidden rounded-lg bg-gray-100">
-        {item.product.images[0] ? (
-          <img src={item.product.images[0]} alt={item.product.name} className="h-full w-full object-cover" />
+        {(item.product.images ?? [])[0] ? (
+          <img src={mediaUrl(item.product.images[0])} alt={item.product.name} className="h-full w-full object-cover" />
         ) : (
           <div className="flex h-full items-center justify-center text-xs text-gray-400">No img</div>
         )}

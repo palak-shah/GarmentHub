@@ -1,0 +1,39 @@
+import path from 'path';
+import { randomUUID } from 'crypto';
+import multer from 'multer';
+import { PRODUCT_IMAGES_DIR, ensureUploadDirs } from '../config/uploadPaths';
+
+const productsDir = PRODUCT_IMAGES_DIR;
+
+const storage = multer.diskStorage({
+  destination: (_req, _file, cb) => {
+    ensureUploadDirs();
+    cb(null, productsDir);
+  },
+  filename: (_req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    const safeExt = ext && ext.length <= 8 && /^\.[a-z0-9.]+$/i.test(ext) ? ext : '.jpg';
+    cb(null, `${randomUUID()}${safeExt}`);
+  },
+});
+
+export const uploadProductImages = multer({
+  storage,
+  limits: { fileSize: 5 * 1024 * 1024, files: 10 },
+  fileFilter: (_req, file, cb) => {
+    const mime = (file.mimetype || '').toLowerCase();
+    const extOk = /\.(jpe?g|png|gif|webp|bmp|heic|heif|avif)$/i.test(file.originalname || '');
+    if (mime.startsWith('image/')) {
+      cb(null, true);
+      return;
+    }
+    if (
+      extOk &&
+      (mime === 'application/octet-stream' || mime === 'binary/octet-stream' || mime === '')
+    ) {
+      cb(null, true);
+      return;
+    }
+    cb(new Error('Only image files are allowed'));
+  },
+});

@@ -8,6 +8,8 @@ async function main() {
   await prisma.order.deleteMany();
   await prisma.product.deleteMany();
   await prisma.brand.deleteMany();
+  await prisma.vendorCategoryAttribute.deleteMany();
+  await prisma.categoryAttribute.deleteMany();
   await prisma.category.deleteMany();
   await prisma.otpStore.deleteMany();
   await prisma.user.deleteMany();
@@ -79,6 +81,29 @@ async function main() {
   const catMap: Record<string, string> = {};
   categories.forEach((c) => (catMap[c.name] = c.id));
 
+  const defaultAttrRows: { categoryId: string; name: string; sortOrder: number }[] = [];
+  for (const name of ['Shirts', 'Sarees', 'Kurtas', 'Trousers', 'Dresses'] as const) {
+    defaultAttrRows.push(
+      { categoryId: catMap[name], name: 'Fabric', sortOrder: 0 },
+      { categoryId: catMap[name], name: 'Pattern', sortOrder: 1 },
+      { categoryId: catMap[name], name: 'Color', sortOrder: 2 },
+    );
+  }
+  for (const name of ['Fabric'] as const) {
+    defaultAttrRows.push(
+      { categoryId: catMap[name], name: 'Width', sortOrder: 3 },
+      { categoryId: catMap[name], name: 'GSM', sortOrder: 4 },
+    );
+  }
+  await prisma.categoryAttribute.createMany({ data: defaultAttrRows });
+
+  await prisma.vendorCategoryAttribute.createMany({
+    data: [
+      { vendorId: vendor1.id, categoryId: catMap['Shirts'], name: 'Fit', sortOrder: 0 },
+      { vendorId: vendor2.id, categoryId: catMap['Dresses'], name: 'Occasion', sortOrder: 0 },
+    ],
+  });
+
   const productData = [
     { name: 'Premium Cotton Shirt', vendorId: vendor1.id, brandId: v1BrandPremium.id, categoryId: catMap['Shirts'], pattern: 'Solid', fabric: 'Cotton', color: 'White', price: 450, moq: 50, images: ['https://images.unsplash.com/photo-1596755094514-f87e34085b2c?w=400'] },
     { name: 'Linen Casual Shirt', vendorId: vendor1.id, brandId: v1BrandPremium.id, categoryId: catMap['Shirts'], pattern: 'Striped', fabric: 'Linen', color: 'Blue', price: 550, moq: 30, images: ['https://images.unsplash.com/photo-1602810318383-e386cc2a3ccf?w=400'] },
@@ -139,10 +164,43 @@ async function main() {
     },
   });
 
+  /** Extra pending lines so vendors can exercise Incoming Orders (filters, accept / offer qty). */
+  const order4 = await prisma.order.create({
+    data: {
+      customerId: customer2.id,
+      status: OrderStatus.PENDING,
+      note: 'Seed: pending lines for vendor1',
+      items: {
+        create: [
+          { productId: products[3].id, vendorId: vendor1.id, requestedQty: 80, status: ItemStatus.PENDING },
+          { productId: products[4].id, vendorId: vendor1.id, requestedQty: 60, status: ItemStatus.PENDING },
+          { productId: products[9].id, vendorId: vendor1.id, requestedQty: 40, status: ItemStatus.PENDING },
+        ],
+      },
+    },
+  });
+
+  const order5 = await prisma.order.create({
+    data: {
+      customerId: customer1.id,
+      status: OrderStatus.PENDING,
+      note: 'Seed: pending lines for vendor2',
+      items: {
+        create: [
+          { productId: products[8].id, vendorId: vendor2.id, requestedQty: 150, status: ItemStatus.PENDING },
+          { productId: products[11].id, vendorId: vendor2.id, requestedQty: 45, status: ItemStatus.PENDING },
+          { productId: products[14].id, vendorId: vendor2.id, requestedQty: 12, status: ItemStatus.PENDING },
+        ],
+      },
+    },
+  });
+
   await prisma.notification.createMany({
     data: [
       { userId: vendor1.id, type: 'ORDER_PLACED', title: 'New Order Received', body: 'You have a new order request', referenceId: order1.id },
       { userId: vendor2.id, type: 'ORDER_PLACED', title: 'New Order Received', body: 'You have a new order request', referenceId: order1.id },
+      { userId: vendor1.id, type: 'ORDER_PLACED', title: 'New Order Received', body: 'You have a new order request', referenceId: order4.id },
+      { userId: vendor2.id, type: 'ORDER_PLACED', title: 'New Order Received', body: 'You have a new order request', referenceId: order5.id },
       { userId: customer1.id, type: 'VENDOR_RESPONSE', title: 'Vendor Responded', body: 'A vendor has responded to your order', referenceId: order2.id },
     ],
   });
@@ -151,7 +209,7 @@ async function main() {
   console.log(`Users: admin(${admin.phone}), vendor1(${vendor1.phone}), vendor2(${vendor2.phone}), customer1(${customer1.phone}), customer2(${customer2.phone})`);
   console.log(`Brands: Vendor1(${v1BrandPremium.name}, ${v1BrandEconomy.name}, ${v1BrandHeritage.name}), Vendor2(${v2BrandElite.name}, ${v2BrandBasics.name})`);
   console.log(`Products: ${products.length}`);
-  console.log(`Orders: 3`);
+  console.log(`Orders: 5 (${order1.id.slice(-6)} pending mixed, ${order4.id.slice(-6)} vendor1 pending, ${order5.id.slice(-6)} vendor2 pending, + 2 responded)`);
 }
 
 main()

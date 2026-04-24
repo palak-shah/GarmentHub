@@ -1,5 +1,6 @@
-import axios from 'axios';
+import axios, { AxiosHeaders } from 'axios';
 import { useAuthStore } from '@/store/authStore';
+import { clearSessionQueryData } from '@/lib/sessionQueries';
 
 const api = axios.create({
   baseURL: '/api',
@@ -11,6 +12,12 @@ api.interceptors.request.use((config) => {
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
+  // Drop JSON content-type for FormData so transformRequest does not stringify the body.
+  if (config.data instanceof FormData) {
+    const h = AxiosHeaders.from(config.headers);
+    h.setContentType(false);
+    config.headers = h;
+  }
   return config;
 });
 
@@ -19,6 +26,7 @@ api.interceptors.response.use(
   (err) => {
     if (err.response?.status === 401) {
       useAuthStore.getState().logout();
+      clearSessionQueryData();
       window.location.href = '/login';
     }
     return Promise.reject(err);

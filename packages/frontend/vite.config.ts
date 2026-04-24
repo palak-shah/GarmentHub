@@ -29,7 +29,9 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
         runtimeCaching: [
           {
-            urlPattern: /^https?:\/\/.*\/api\/.*/i,
+            // Never cache API POST/PUT (e.g. multipart uploads); only cache GET reads.
+            urlPattern: ({ request, url }: { request: Request; url: URL }) =>
+              request.method === 'GET' && /\/api\//.test(url.pathname),
             handler: 'NetworkFirst',
             options: { cacheName: 'api-cache', expiration: { maxEntries: 100, maxAgeSeconds: 300 } },
           },
@@ -47,6 +49,17 @@ export default defineConfig({
   },
   server: {
     port: 3000,
-    proxy: { '/api': 'http://localhost:4000' },
+    proxy: {
+      '/api': { target: 'http://localhost:4000', changeOrigin: true },
+      '/uploads': { target: 'http://localhost:4000', changeOrigin: true },
+    },
+  },
+  /** Same proxy as dev — needed so `vite preview` can reach the API and `/uploads`. */
+  preview: {
+    port: 4173,
+    proxy: {
+      '/api': { target: 'http://localhost:4000', changeOrigin: true },
+      '/uploads': { target: 'http://localhost:4000', changeOrigin: true },
+    },
   },
 });

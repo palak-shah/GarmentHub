@@ -8,6 +8,7 @@ export const createProductDto = z.object({
   pattern: z.string().default(''),
   fabric: z.string().default(''),
   color: z.string().default(''),
+  attributeValues: z.record(z.string()).optional(),
   price: z.number().positive().optional(),
   moq: z.number().int().positive().default(1),
   status: z.enum(['ACTIVE', 'DRAFT', 'ARCHIVED']).default('ACTIVE'),

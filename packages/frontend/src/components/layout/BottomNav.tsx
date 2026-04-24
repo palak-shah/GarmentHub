@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { Home, Search, ShoppingCart, ClipboardList, Package, LayoutDashboard, Users, Tag } from 'lucide-react';
+import { Home, Search, ShoppingCart, ClipboardList, Package, LayoutDashboard, Users, Tag, Settings, ListTree } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
 import { useCartStore } from '@/store/cartStore';
 import type { Role } from '@/types';
@@ -16,6 +16,7 @@ function getNavItems(role: Role, cartCount: number): NavItem[] {
     return [
       { to: '/vendor', label: 'Dashboard', icon: <LayoutDashboard className="h-5 w-5" /> },
       { to: '/vendor/brands', label: 'Brands', icon: <Tag className="h-5 w-5" /> },
+      { to: '/vendor/catalog', label: 'Catalog', icon: <ListTree className="h-5 w-5" /> },
       { to: '/vendor/products', label: 'Products', icon: <Package className="h-5 w-5" /> },
       { to: '/vendor/orders', label: 'Orders', icon: <ClipboardList className="h-5 w-5" /> },
     ];
@@ -25,6 +26,7 @@ function getNavItems(role: Role, cartCount: number): NavItem[] {
       { to: '/admin', label: 'Dashboard', icon: <LayoutDashboard className="h-5 w-5" /> },
       { to: '/admin/users', label: 'Users', icon: <Users className="h-5 w-5" /> },
       { to: '/admin/orders', label: 'Orders', icon: <ClipboardList className="h-5 w-5" /> },
+      { to: '/admin/settings', label: 'Settings', icon: <Settings className="h-5 w-5" /> },
     ];
   }
   return [

@@ -2,6 +2,49 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../config/db';
 import { CreateProductDto, UpdateProductDto, ProductQueryDto } from '../dto/product.dto';
 import { NotFoundError, ForbiddenError } from '../utils/errors';
+import {
+  jsonToStringRecord,
+  parseAndValidateAttributeValues,
+  resolveLegacyColumns,
+} from './attribute.helpers';
+
+const categoryAttrInclude = {
+  attributes: { orderBy: [{ sortOrder: 'asc' as const }, { name: 'asc' as const }] },
+};
+
+async function enrichProduct<T extends { attributeValues: unknown; categoryId: string; vendorId: string; fabric: string; pattern: string; color: string }>(
+  product: T,
+) {
+  const values = jsonToStringRecord(product.attributeValues);
+  const cat = await prisma.category.findUnique({
+    where: { id: product.categoryId },
+    include: categoryAttrInclude,
+  });
+  const vendAttrs = await prisma.vendorCategoryAttribute.findMany({
+    where: { vendorId: product.vendorId, categoryId: product.categoryId },
+    orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+  });
+
+  const displayAttributes: { label: string; value: string }[] = [];
+  if (cat) {
+    for (const a of cat.attributes) {
+      const v = values[a.id];
+      if (v) displayAttributes.push({ label: a.name, value: v });
+    }
+  }
+  for (const a of vendAttrs) {
+    const v = values[a.id];
+    if (v) displayAttributes.push({ label: a.name, value: v });
+  }
+
+  if (displayAttributes.length === 0) {
+    if (product.fabric) displayAttributes.push({ label: 'Fabric', value: product.fabric });
+    if (product.pattern) displayAttributes.push({ label: 'Pattern', value: product.pattern });
+    if (product.color) displayAttributes.push({ label: 'Color', value: product.color });
+  }
+
+  return { ...product, displayAttributes };
+}
 
 export class ProductService {
   static async list(query: ProductQueryDto) {
@@ -49,22 +92,41 @@ export class ProductService {
       include: { vendor: { select: { id: true, name: true, businessName: true } }, brand: true, category: true },
     });
     if (!product) throw new NotFoundError('Product');
-    return product;
+    return enrichProduct(product);
   }
 
   static async getByVendor(vendorId: string) {
-    return prisma.product.findMany({
+    const products = await prisma.product.findMany({
       where: { vendorId },
       include: { brand: true, category: true },
       orderBy: { createdAt: 'desc' },
     });
+    return Promise.all(products.map((p) => enrichProduct(p)));
   }
 
   static async create(vendorId: string, data: CreateProductDto) {
-    return prisma.product.create({
-      data: { ...data, vendorId },
-      include: { brand: true, category: true },
+    const catAttrs = await prisma.categoryAttribute.findMany({ where: { categoryId: data.categoryId } });
+    const avJson = await parseAndValidateAttributeValues(vendorId, data.categoryId, data.attributeValues);
+    const values = jsonToStringRecord(avJson);
+    const legacy = resolveLegacyColumns(catAttrs, values, {
+      fabric: data.fabric,
+      pattern: data.pattern,
+      color: data.color,
     });
+
+    const { attributeValues: _drop, ...fields } = data;
+    const product = await prisma.product.create({
+      data: {
+        ...fields,
+        vendorId,
+        attributeValues: avJson,
+        fabric: legacy.fabric,
+        pattern: legacy.pattern,
+        color: legacy.color,
+      },
+      include: { brand: true, category: { include: categoryAttrInclude } },
+    });
+    return enrichProduct(product);
   }
 
   static async update(id: string, vendorId: string, data: UpdateProductDto) {
@@ -72,11 +134,37 @@ export class ProductService {
     if (!product) throw new NotFoundError('Product');
     if (product.vendorId !== vendorId) throw new ForbiddenError('Not your product');
 
-    return prisma.product.update({
-      where: { id },
-      data,
-      include: { brand: true, category: true },
+    const categoryId = data.categoryId ?? product.categoryId;
+    const catAttrs = await prisma.categoryAttribute.findMany({ where: { categoryId } });
+
+    let attributeValues = product.attributeValues;
+    if (data.attributeValues !== undefined) {
+      attributeValues = await parseAndValidateAttributeValues(vendorId, categoryId, data.attributeValues);
+    }
+
+    const values = jsonToStringRecord(attributeValues);
+    const fallbackFabric = data.fabric ?? product.fabric;
+    const fallbackPattern = data.pattern ?? product.pattern;
+    const fallbackColor = data.color ?? product.color;
+    const legacy = resolveLegacyColumns(catAttrs, values, {
+      fabric: fallbackFabric,
+      pattern: fallbackPattern,
+      color: fallbackColor,
     });
+
+    const { attributeValues: _drop, ...rest } = data;
+    const updated = await prisma.product.update({
+      where: { id },
+      data: {
+        ...rest,
+        ...(data.attributeValues !== undefined ? { attributeValues } : {}),
+        fabric: legacy.fabric,
+        pattern: legacy.pattern,
+        color: legacy.color,
+      },
+      include: { brand: true, category: { include: categoryAttrInclude } },
+    });
+    return enrichProduct(updated);
   }
 
   static async delete(id: string, vendorId: string) {
@@ -102,7 +190,10 @@ export class ProductService {
   }
 
   static async getCategories() {
-    return prisma.category.findMany({ orderBy: { name: 'asc' } });
+    return prisma.category.findMany({
+      orderBy: { name: 'asc' },
+      include: categoryAttrInclude,
+    });
   }
 
   static async getFilterOptions() {
@@ -110,7 +201,7 @@ export class ProductService {
       prisma.product.findMany({ where: { status: 'ACTIVE' }, select: { pattern: true }, distinct: ['pattern'] }),
       prisma.product.findMany({ where: { status: 'ACTIVE' }, select: { fabric: true }, distinct: ['fabric'] }),
       prisma.product.findMany({ where: { status: 'ACTIVE' }, select: { color: true }, distinct: ['color'] }),
-      prisma.category.findMany({ orderBy: { name: 'asc' } }),
+      prisma.category.findMany({ orderBy: { name: 'asc' }, include: categoryAttrInclude }),
       prisma.brand.findMany({ orderBy: { name: 'asc' }, select: { id: true, name: true } }),
     ]);
 

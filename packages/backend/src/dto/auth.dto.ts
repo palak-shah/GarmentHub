@@ -7,6 +7,7 @@ export const sendOtpDto = z.object({
 export const verifyOtpDto = z.object({
   phone: z.string().min(10).max(15),
   code: z.string().length(6),
+  role: z.enum(['CUSTOMER', 'VENDOR', 'TRADER']).optional(),
 });
 
 export const updateProfileDto = z.object({

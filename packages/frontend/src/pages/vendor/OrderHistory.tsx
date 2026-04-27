@@ -47,9 +47,18 @@ export default function VendorOrderHistory() {
                         <span className="text-gray-500">Requested: </span>
                         <span className="font-semibold text-gray-900">{item.requestedQty} units</span>
                       </div>
-                      {item.product.price && (
-                        <span className="text-xs text-gray-500">{formatPrice(item.product.price)}/unit</span>
-                      )}
+                      <div className="text-right text-xs space-y-0.5">
+                        {item.product.price != null && (
+                          <p className="text-gray-500">
+                            List: {formatPrice(item.product.price, item.product.priceMax)}/unit
+                          </p>
+                        )}
+                        {item.traderTargetUnitPrice != null && (
+                          <p className="font-semibold text-primary-900">
+                            Trader to customer: {formatPrice(item.traderTargetUnitPrice)}/unit
+                          </p>
+                        )}
+                      </div>
                     </div>
                     {item.acceptedQty != null ? (
                       <div>

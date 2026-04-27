@@ -1,0 +1,237 @@
+# GarmentHub - User Journeys (Final v2)
+
+---
+
+## 1. Customer Journeys
+
+### CJ1: Onboarding
+- Enter mobile
+- OTP login
+- Auto-connect via invite
+
+---
+
+### CJ2: Build Network
+- Search traders
+- Follow/connect
+
+---
+
+### CJ3: View Feed (Continuous Use)
+- Open app anytime
+- See:
+  - New (unseen)
+  - Seen
+- Resume from last position
+
+---
+
+### CJ4: Scan Products
+- Grid view
+- Quick scroll
+- Multi-select
+
+---
+
+### CJ5: Evaluate Products
+- Open product
+- View details
+- Swipe between items
+
+---
+
+### CJ6: Place Bulk Order
+- Select multiple products
+- Enter:
+  - Same qty OR
+  - Group qty
+- Place single order
+
+---
+
+### CJ7: Choose Order Mode
+- Order via Trader
+- Contact Vendor
+
+---
+
+### CJ8: Handle Responses
+- Accept / modify / cancel
+
+---
+
+### CJ9: Order History
+- View past orders
+- Reorder
+
+---
+
+## 2. Vendor Journeys
+
+### VJ1: Onboarding
+- OTP login
+- Connect with traders
+
+---
+
+### VJ2: Bulk Upload
+- Upload many images
+- Apply bulk tags
+
+---
+
+### VJ3: Feed Contribution
+- Upload appears in trader feed
+
+---
+
+### VJ4: Receive Orders
+- From trader OR customer
+
+---
+
+### VJ5: Respond
+- Accept / reject / alter qty
+
+---
+
+### VJ6: Track Orders
+- View history
+
+---
+
+## 3. Trader Journeys (Core User)
+
+### TJ1: Onboarding
+- Build network:
+  - Follow vendors
+  - Add customers
+
+---
+
+### TJ2: Continuous Feed Usage
+- Open anytime
+- See:
+  - New uploads
+  - Pending items
+- Resume where left
+
+---
+
+### TJ3: Scan Mode (Fast)
+- Grid view
+- Quick multi-select
+- Bulk share
+
+---
+
+### TJ4: Evaluate Mode (Deep)
+- Open product
+- Analyze
+- Decide
+
+---
+
+### TJ5: Curate & Share
+- Select products
+- Share to customers
+
+---
+
+### TJ6: Choose Order Mode
+- Managed
+- Direct
+
+---
+
+### TJ7: Monitor Orders
+- Managed orders
+- Observed orders
+
+---
+
+### TJ8: Intervene
+- Triggered by issues
+- Take control
+
+---
+
+## 4. Network Journeys
+
+### NJ1: Invite Flow
+- Send invite link
+- Auto-connect on signup
+
+---
+
+### NJ2: Follow System
+- Trader follows vendor
+- Customer follows trader
+
+---
+
+### NJ3: Feed Flow
+
+Vendor → Trader  
+Trader → Customer  
+
+---
+
+## 5. System Journeys
+
+### SJ1: Feed Prioritization
+1. Trader curated
+2. Vendor uploads
+
+---
+
+### SJ2: Workflow Memory
+- Track:
+  - Seen
+  - Shared
+  - Ordered
+
+---
+
+### SJ3: Order Routing
+- Managed vs Direct
+
+---
+
+### SJ4: Notification Batching
+- Group updates
+- Avoid spam
+
+---
+
+### SJ5: Intervention Logic
+- Detect delays/issues
+- Notify trader
+
+---
+
+## 6. Core Behavioral Flows
+
+### BF1: Scan Mode
+- Fast selection
+- Minimal thinking
+
+### BF2: Evaluate Mode
+- Deep inspection
+- Careful decision
+
+👉 System supports both seamlessly
+
+---
+
+## 7. MVP Critical Flows
+
+- Vendor bulk upload
+- Trader feed (with tracking)
+- Multi-select + share
+- Customer feed
+- Bulk order
+- Vendor response
+- Trader intervention
+
+---

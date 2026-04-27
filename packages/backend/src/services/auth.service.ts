@@ -4,13 +4,14 @@ import { env } from '../config/env';
 import { OtpService } from './otp.service';
 import { AppError, NotFoundError } from '../utils/errors';
 import { UpdateProfileDto } from '../dto/auth.dto';
+import { Role } from '@prisma/client';
 
 export class AuthService {
   static async sendOtp(phone: string) {
     return OtpService.send(phone);
   }
 
-  static async verifyOtp(phone: string, code: string) {
+  static async verifyOtp(phone: string, code: string, role?: 'CUSTOMER' | 'VENDOR' | 'TRADER') {
     const valid = await OtpService.verify(phone, code);
     if (!valid) {
       throw new AppError(400, 'Invalid or expired OTP');
@@ -21,7 +22,7 @@ export class AuthService {
 
     if (!user) {
       user = await prisma.user.create({
-        data: { phone, name: '', role: 'CUSTOMER' },
+        data: { phone, name: '', role: role ?? 'CUSTOMER' },
       });
     }
 

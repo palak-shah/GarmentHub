@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../config/db';
 import { CreateProductDto, UpdateProductDto, ProductQueryDto } from '../dto/product.dto';
 import { NotFoundError, ForbiddenError } from '../utils/errors';
+import { NotificationService } from './notification.service';
 import {
   jsonToStringRecord,
   parseAndValidateAttributeValues,
@@ -57,6 +58,7 @@ export class ProductService {
         { fabric: { contains: query.search, mode: 'insensitive' } },
       ];
     }
+    if (query.vendorId) where.vendorId = query.vendorId;
     if (query.brandId) where.brandId = query.brandId;
     if (query.categoryId) where.categoryId = query.categoryId;
     if (query.pattern) where.pattern = { contains: query.pattern, mode: 'insensitive' };
@@ -89,7 +91,12 @@ export class ProductService {
   static async getById(id: string) {
     const product = await prisma.product.findUnique({
       where: { id },
-      include: { vendor: { select: { id: true, name: true, businessName: true } }, brand: true, category: true },
+      include: {
+        vendor: { select: { id: true, name: true, businessName: true, phone: true } },
+        trader: { select: { id: true, name: true, businessName: true } },
+        brand: true,
+        category: true,
+      },
     });
     if (!product) throw new NotFoundError('Product');
     return enrichProduct(product);
@@ -126,6 +133,16 @@ export class ProductService {
       },
       include: { brand: true, category: { include: categoryAttrInclude } },
     });
+
+    const vendor = await prisma.user.findUnique({
+      where: { id: vendorId },
+      select: { businessName: true, name: true },
+    });
+    NotificationService.queueProductUploadNotification(
+      vendorId,
+      vendor?.businessName || vendor?.name || 'A vendor',
+    );
+
     return enrichProduct(product);
   }
 
@@ -189,6 +206,32 @@ export class ProductService {
     return { deleted: result.count };
   }
 
+  static async bulkUpdate(
+    ids: string[],
+    vendorId: string,
+    updates: { categoryId?: string; moq?: number; status?: 'ACTIVE' | 'DRAFT' | 'ARCHIVED' },
+  ) {
+    const products = await prisma.product.findMany({ where: { id: { in: ids } } });
+    const notOwned = products.filter((p) => p.vendorId !== vendorId);
+    if (notOwned.length > 0) throw new ForbiddenError('Some products do not belong to you');
+
+    const found = products.map((p) => p.id);
+    const missing = ids.filter((id) => !found.includes(id));
+    if (missing.length > 0) throw new NotFoundError('Some products');
+
+    const data: Record<string, unknown> = {};
+    if (updates.categoryId) data.categoryId = updates.categoryId;
+    if (updates.moq !== undefined) data.moq = updates.moq;
+    if (updates.status) data.status = updates.status;
+
+    const result = await prisma.product.updateMany({
+      where: { id: { in: ids }, vendorId },
+      data,
+    });
+
+    return { updated: result.count };
+  }
+
   static async getCategories() {
     return prisma.category.findMany({
       orderBy: { name: 'asc' },
@@ -212,5 +255,186 @@ export class ProductService {
       fabrics: fabrics.map((f) => f.fabric).filter(Boolean),
       colors: colors.map((c) => c.color).filter(Boolean),
     };
+  }
+
+  /**
+   * Customer feed scoping:
+   *   Customer follows Traders → we resolve those traders' followed Vendors
+   *   → show products from those vendors + curated share products.
+   * Trader feed uses the Workflow endpoints instead.
+   */
+  static async feed(userId: string, cursor?: string, limit = 20, categoryId?: string | null) {
+    const feedInclude = {
+      vendor: { select: { id: true, name: true, businessName: true } },
+      brand: true,
+      category: true,
+      trader: { select: { id: true, name: true, businessName: true } },
+    };
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { role: true },
+    });
+
+    const connections = await prisma.connection.findMany({
+      where: { followerId: userId },
+      select: { followingId: true },
+    });
+    const followedIds = connections.map((c) => c.followingId);
+
+    let vendorIds: string[] = [];
+
+    if (user?.role === 'CUSTOMER' && followedIds.length > 0) {
+      // Customer follows traders (and possibly vendors directly).
+      // Resolve followed users' roles so we can look through traders.
+      const followedUsers = await prisma.user.findMany({
+        where: { id: { in: followedIds } },
+        select: { id: true, role: true },
+      });
+
+      const directVendorIds = followedUsers
+        .filter((u) => u.role === 'VENDOR')
+        .map((u) => u.id);
+      const traderIds = followedUsers
+        .filter((u) => u.role === 'TRADER')
+        .map((u) => u.id);
+
+      // Indirect: vendors that followed traders follow
+      let indirectVendorIds: string[] = [];
+      if (traderIds.length > 0) {
+        const traderConns = await prisma.connection.findMany({
+          where: { followerId: { in: traderIds } },
+          select: { followingId: true },
+        });
+        const candidateIds = [...new Set(traderConns.map((c) => c.followingId))];
+        if (candidateIds.length > 0) {
+          const vendorUsers = await prisma.user.findMany({
+            where: { id: { in: candidateIds }, role: 'VENDOR' },
+            select: { id: true },
+          });
+          indirectVendorIds = vendorUsers.map((u) => u.id);
+        }
+      }
+
+      vendorIds = [...new Set([...directVendorIds, ...indirectVendorIds])];
+    } else {
+      // Trader or other role: followedIds are already vendor IDs
+      vendorIds = followedIds;
+    }
+
+    // Curated share products — include ALL (read + unread) for customers
+    const sharedProductIds = await prisma.curatedShareRecipient.findMany({
+      where: { customerId: userId },
+      select: { curatedShare: { select: { products: { select: { productId: true } } } } },
+    }).then((rows) =>
+      [...new Set(rows.flatMap((r) => r.curatedShare.products.map((p) => p.productId)))],
+    );
+
+    const networkFilter: Prisma.ProductWhereInput =
+      vendorIds.length > 0 || sharedProductIds.length > 0
+        ? {
+            OR: [
+              ...(vendorIds.length > 0 ? [{ vendorId: { in: vendorIds } }] : []),
+              ...(sharedProductIds.length > 0 ? [{ id: { in: sharedProductIds } }] : []),
+            ],
+          }
+        : {};
+
+    const userStates = await prisma.userProductState.findMany({
+      where: { userId },
+      select: { productId: true, state: true },
+    });
+
+    const seenIds = userStates.filter((s) => s.state === 'SEEN').map((s) => s.productId);
+    const doneIds = userStates
+      .filter((s) => s.state === 'SHARED' || s.state === 'ORDERED')
+      .map((s) => s.productId);
+    const allTrackedIds = userStates.map((s) => s.productId);
+
+    const unseenWhere: Prisma.ProductWhereInput = {
+      status: 'ACTIVE',
+      ...networkFilter,
+      ...(allTrackedIds.length > 0 ? { id: { notIn: allTrackedIds } } : {}),
+    };
+
+    if (cursor) {
+      const cursorProduct = await prisma.product.findUnique({
+        where: { id: cursor },
+        select: { createdAt: true },
+      });
+      if (cursorProduct) {
+        unseenWhere.createdAt = { lt: cursorProduct.createdAt };
+      }
+    }
+
+    const unseenProducts = await prisma.product.findMany({
+      where: unseenWhere,
+      include: feedInclude,
+      orderBy: { createdAt: 'desc' },
+      take: limit + 1,
+    });
+
+    let nextCursor: string | null = null;
+    if (unseenProducts.length > limit) {
+      const last = unseenProducts.pop()!;
+      nextCursor = last.id;
+    }
+
+    const pendingProducts = seenIds.length > 0
+      ? await prisma.product.findMany({
+          where: {
+            id: { in: seenIds },
+            status: 'ACTIVE',
+            ...(categoryId ? { categoryId } : {}),
+          },
+          include: feedInclude,
+          orderBy: { createdAt: 'desc' },
+        })
+      : [];
+
+    const doneProducts = doneIds.length > 0
+      ? await prisma.product.findMany({
+          where: {
+            id: { in: doneIds },
+            status: 'ACTIVE',
+            ...(categoryId ? { categoryId } : {}),
+          },
+          include: feedInclude,
+          orderBy: { createdAt: 'desc' },
+          take: 20,
+        })
+      : [];
+
+    return { newProducts: unseenProducts, pendingProducts, doneProducts, nextCursor };
+  }
+
+  static async saveProduct(userId: string, productId: string) {
+    return prisma.savedProduct.upsert({
+      where: { userId_productId: { userId, productId } },
+      create: { userId, productId },
+      update: {},
+    });
+  }
+
+  static async unsaveProduct(userId: string, productId: string) {
+    return prisma.savedProduct.delete({
+      where: { userId_productId: { userId, productId } },
+    });
+  }
+
+  static async getSavedProducts(userId: string) {
+    const saved = await prisma.savedProduct.findMany({
+      where: { userId },
+      include: {
+        product: {
+          include: {
+            vendor: { select: { id: true, name: true, businessName: true } },
+            brand: true,
+            category: true,
+          },
+        },
+      },
+    });
+    return saved.map((s) => s.product);
   }
 }

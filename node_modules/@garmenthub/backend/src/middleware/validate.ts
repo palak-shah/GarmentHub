@@ -4,7 +4,8 @@ import { ZodSchema } from 'zod';
 export function validate(schema: ZodSchema) {
   return (req: Request, _res: Response, next: NextFunction) => {
     try {
-      req.body = schema.parse(req.body);
+      // express.json() may leave body undefined for empty POST bodies
+      req.body = schema.parse(req.body ?? {});
       next();
     } catch (err) {
       next(err);

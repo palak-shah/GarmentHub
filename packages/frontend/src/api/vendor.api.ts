@@ -5,6 +5,7 @@ export interface VendorResponsePayload {
   action: 'ACCEPT' | 'REJECT' | 'ALTER';
   alteredQty?: number;
   note?: string;
+  offeredUnitPrice?: number;
 }
 
 export const vendorApi = {
@@ -13,6 +14,22 @@ export const vendorApi = {
 
   respondToItem: (itemId: string, data: VendorResponsePayload) =>
     api.put<ApiResponse<OrderItem>>(`/vendor/orders/items/${itemId}/respond`, data).then((r) => r.data.data),
+
+  bulkRespond: (
+    responses: Array<{
+      itemId: string;
+      action: 'ACCEPT' | 'REJECT' | 'ALTER';
+      alteredQty?: number;
+      offeredUnitPrice?: number;
+      note?: string;
+    }>,
+  ) =>
+    api
+      .post<ApiResponse<{ updated: number }>>('/vendor/orders/items/bulk-respond', { responses })
+      .then((r) => r.data.data),
+
+  respondToTraderPrice: (itemId: string, data: { action: 'ACCEPT' | 'REJECT' }) =>
+    api.put<ApiResponse<OrderItem>>(`/vendor/orders/items/${itemId}/price-counter`, data).then((r) => r.data.data),
 
   getCatalogCategories: () =>
     api.get<ApiResponse<VendorCatalogCategory[]>>('/vendor/categories').then((r) => r.data.data),

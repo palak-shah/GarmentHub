@@ -12,3 +12,13 @@ export function mediaUrl(src: string | undefined | null): string {
   if (apiOrigin) return `${apiOrigin}${path}`;
   return path;
 }
+
+/**
+ * Returns the thumbnail URL for a product image.
+ * Convention: `/uploads/products/abc.jpg` → `/uploads/thumbs/abc.jpg`
+ */
+export function thumbUrl(src: string | undefined | null): string {
+  if (src == null || src === '') return '';
+  const thumb = src.replace('/uploads/products/', '/uploads/thumbs/');
+  return mediaUrl(thumb);
+}

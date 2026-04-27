@@ -12,7 +12,7 @@ export class AuthController {
 
   static async verifyOtp(req: Request, res: Response, next: NextFunction) {
     try {
-      const result = await AuthService.verifyOtp(req.body.phone, req.body.code);
+      const result = await AuthService.verifyOtp(req.body.phone, req.body.code, req.body.role);
       success(res, result, 'Login successful');
     } catch (err) { next(err); }
   }

@@ -17,13 +17,29 @@ body {
   @apply bg-gray-50 text-gray-900 antialiased;
 }
 
-/* Smooth transitions for page changes */
-.page-enter {
-  opacity: 0;
-  transform: translateY(8px);
+/* Smooth fade-in for tab page mounts */
+@keyframes page-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
-.page-enter-active {
-  opacity: 1;
-  transform: translateY(0);
-  transition: opacity 200ms ease-out, transform 200ms ease-out;
+.animate-page-in {
+  animation: page-fade-in 120ms ease-out;
+}
+
+/* Slide-up animation for SelectionActionBar */
+@keyframes slide-up {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+.animate-slide-up {
+  animation: slide-up 150ms ease-out;
+}
+
+/* Hide scrollbar for horizontal scroll areas */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
 }

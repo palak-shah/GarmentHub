@@ -10,6 +10,7 @@ export const createProductDto = z.object({
   color: z.string().default(''),
   attributeValues: z.record(z.string()).optional(),
   price: z.number().positive().optional(),
+  priceMax: z.number().positive().optional(),
   moq: z.number().int().positive().default(1),
   status: z.enum(['ACTIVE', 'DRAFT', 'ARCHIVED']).default('ACTIVE'),
 });
@@ -18,6 +19,7 @@ export const updateProductDto = createProductDto.partial();
 
 export const productQueryDto = z.object({
   search: z.string().optional(),
+  vendorId: z.string().optional(),
   brandId: z.string().optional(),
   categoryId: z.string().optional(),
   pattern: z.string().optional(),

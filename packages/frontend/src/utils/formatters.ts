@@ -1,7 +1,10 @@
 import type { OrderStatus, ItemStatus } from '@/types';
 
-export function formatPrice(price?: number | null): string {
+export function formatPrice(price?: number | null, priceMax?: number | null): string {
   if (price == null) return 'Price on request';
+  if (priceMax != null && priceMax > price) {
+    return `₹${price.toLocaleString('en-IN')} – ₹${priceMax.toLocaleString('en-IN')}`;
+  }
   return `₹${price.toLocaleString('en-IN')}`;
 }
 

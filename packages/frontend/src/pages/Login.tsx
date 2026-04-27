@@ -1,8 +1,10 @@
 import { useState, useRef, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useMutation } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
+import { Store, UserCheck, ShoppingBag } from 'lucide-react';
 import { authApi } from '@/api/auth.api';
+import { networkApi } from '@/api/network.api';
 import { useAuthStore } from '@/store/authStore';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
@@ -15,11 +17,22 @@ function normalizeOtp(v: string) {
   return v.replace(/\s/g, '').replace(/\D/g, '').slice(0, 6);
 }
 
+type SelectedRole = 'CUSTOMER' | 'VENDOR' | 'TRADER';
+
+const ROLES: { value: SelectedRole; label: string; desc: string; icon: React.ReactNode }[] = [
+  { value: 'CUSTOMER', label: 'Buyer', desc: 'I buy garments', icon: <ShoppingBag className="h-7 w-7" /> },
+  { value: 'TRADER', label: 'Trader', desc: 'I trade garments', icon: <UserCheck className="h-7 w-7" /> },
+  { value: 'VENDOR', label: 'Supplier', desc: 'I supply garments', icon: <Store className="h-7 w-7" /> },
+];
+
 export default function Login() {
   const [phone, setPhone] = useState('');
   const [code, setCode] = useState('');
-  const [step, setStep] = useState<'phone' | 'otp'>('phone');
+  const [step, setStep] = useState<'phone' | 'otp' | 'role'>('phone');
+  const [selectedRole, setSelectedRole] = useState<SelectedRole>('CUSTOMER');
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const inviteCode = searchParams.get('invite');
   const setAuth = useAuthStore((s) => s.setAuth);
   const phoneRef = useRef<HTMLInputElement>(null);
   const codeRef = useRef<HTMLInputElement>(null);
@@ -32,19 +45,34 @@ export default function Login() {
     mutationFn: () => authApi.sendOtp(phoneClean),
     onSuccess: () => {
       setStep('otp');
-      toast.success('OTP sent! (Use 123456)');
+      toast.success('OTP sent!');
     },
     onError: () => toast.error('Failed to send OTP'),
   });
 
   const verifyOtp = useMutation({
-    mutationFn: () => authApi.verifyOtp(phoneClean, code),
-    onSuccess: (data) => {
+    mutationFn: (vars: { role?: SelectedRole } = {}) => authApi.verifyOtp(phoneClean, code, vars.role),
+    onSuccess: async (data) => {
+      if (data.isNewUser && step === 'otp') {
+        setStep('role');
+        return;
+      }
       setAuth(data.token, data.user);
-      toast.success('Welcome to GarmentHub!');
-      const role = data.user.role;
-      if (role === 'VENDOR') navigate('/vendor', { replace: true });
-      else if (role === 'ADMIN') navigate('/admin', { replace: true });
+
+      // Auto-connect via invite code if present
+      if (inviteCode) {
+        try {
+          const connected = await networkApi.connectViaInvite(inviteCode);
+          toast.success(`Connected with ${connected.businessName || connected.name}!`);
+        } catch {
+          // Silently ignore if invite code is invalid/expired
+        }
+      }
+
+      toast.success('Welcome!');
+      const r = data.user.role;
+      if (r === 'VENDOR') navigate('/vendor', { replace: true });
+      else if (r === 'ADMIN') navigate('/admin', { replace: true });
       else navigate('/', { replace: true });
     },
     onError: () => toast.error('Invalid OTP'),
@@ -53,48 +81,10 @@ export default function Login() {
   useEffect(() => {
     const t = window.setTimeout(() => {
       if (step === 'phone') phoneRef.current?.focus();
-      else codeRef.current?.focus();
+      else if (step === 'otp') codeRef.current?.focus();
     }, 0);
     return () => window.clearTimeout(t);
   }, [step]);
-
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      const ae = document.activeElement;
-      if (ae instanceof HTMLInputElement || ae instanceof HTMLTextAreaElement) return;
-      if (ae instanceof HTMLButtonElement || ae instanceof HTMLSelectElement) return;
-      if (e.ctrlKey || e.metaKey || e.altKey) return;
-
-      const pClean = normalizePhone(phone);
-      const sendOk = pClean.length >= 10;
-      const verifyOk = code.length === 6;
-
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        if (step === 'phone' && sendOk && !sendOtp.isPending) sendOtp.mutate();
-        else if (step === 'otp' && verifyOk && !verifyOtp.isPending) verifyOtp.mutate();
-        return;
-      }
-
-      if (e.key.length !== 1) return;
-
-      if (step === 'phone' && /\d/.test(e.key)) {
-        e.preventDefault();
-        phoneRef.current?.focus();
-        setPhone((prev) => normalizePhone(prev + e.key).slice(0, 15));
-        return;
-      }
-
-      if (step === 'otp' && /\d/.test(e.key)) {
-        e.preventDefault();
-        codeRef.current?.focus();
-        setCode((prev) => normalizeOtp(prev + e.key));
-      }
-    };
-
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [step, phone, code, sendOtp.isPending, verifyOtp.isPending, sendOtp, verifyOtp]);
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-primary-50 to-primary-100 px-4">
@@ -104,29 +94,23 @@ export default function Login() {
             G
           </div>
           <h1 className="text-2xl font-bold text-gray-900">GarmentHub</h1>
-          <p className="mt-1 text-sm text-gray-600">B2B Garment Trading Platform</p>
         </div>
 
         <form
           className="rounded-2xl bg-white p-6 shadow-xl"
           onSubmit={(e) => {
             e.preventDefault();
-            if (step === 'phone') {
-              if (canSendOtp && !sendOtp.isPending) sendOtp.mutate();
-            } else if (canVerify && !verifyOtp.isPending) {
-              verifyOtp.mutate();
-            }
+            if (step === 'phone' && canSendOtp && !sendOtp.isPending) sendOtp.mutate();
+            else if (step === 'otp' && canVerify && !verifyOtp.isPending) verifyOtp.mutate({});
           }}
         >
-          {step === 'phone' ? (
+          {step === 'phone' && (
             <>
-              <h2 className="mb-1 text-lg font-semibold">Login</h2>
-              <p className="mb-6 text-sm text-gray-500">Enter your phone number to get started</p>
+              <h2 className="mb-6 text-center text-lg font-semibold">Enter your phone number</h2>
               <Input
                 ref={phoneRef}
-                label="Phone Number"
                 type="tel"
-                placeholder="e.g. 9999900003"
+                placeholder="Phone number"
                 value={phone}
                 onChange={(e) => setPhone(normalizePhone(e.target.value).slice(0, 15))}
                 autoComplete="tel"
@@ -135,31 +119,32 @@ export default function Login() {
               <Button
                 type="submit"
                 className="mt-4 w-full"
+                size="lg"
                 loading={sendOtp.isPending}
                 disabled={!canSendOtp}
               >
-                Send OTP
+                Get OTP
               </Button>
-              <div className="mt-4 rounded-lg bg-blue-50 p-3 text-xs text-blue-700">
-                <strong>Demo accounts:</strong><br />
-                Customer: 9999900003 / 9999900004<br />
-                Vendor: 9999900001 / 9999900002<br />
-                Admin: 9999900000<br />
-                OTP for all: 123456
+              {inviteCode && (
+                <div className="mt-4 rounded-lg bg-primary-50 border border-primary-200 p-3 text-xs text-primary-700">
+                  You've been invited! Sign in to connect automatically.
+                </div>
+              )}
+              <div className="mt-4 rounded-lg bg-gray-50 p-3 text-xs text-gray-500">
+                <strong>Try:</strong> Buyer 9999900003 · Vendor 9999900001 · Trader 9999900005 · OTP: 123456
               </div>
             </>
-          ) : (
+          )}
+
+          {step === 'otp' && (
             <>
-              <h2 className="mb-1 text-lg font-semibold">Verify OTP</h2>
-              <p className="mb-6 text-sm text-gray-500">
-                Enter the code sent to <strong>{phoneClean}</strong>
-              </p>
+              <h2 className="mb-2 text-center text-lg font-semibold">Enter OTP</h2>
+              <p className="mb-6 text-center text-sm text-gray-500">{phoneClean}</p>
               <Input
                 ref={codeRef}
-                label="OTP Code"
                 type="text"
                 inputMode="numeric"
-                placeholder="123456"
+                placeholder="6-digit code"
                 maxLength={6}
                 value={code}
                 onChange={(e) => setCode(normalizeOtp(e.target.value))}
@@ -169,21 +154,56 @@ export default function Login() {
               <Button
                 type="submit"
                 className="mt-4 w-full"
+                size="lg"
                 loading={verifyOtp.isPending}
                 disabled={!canVerify}
               >
-                Verify & Login
+                Login
               </Button>
               <button
                 type="button"
-                onClick={() => {
-                  setStep('phone');
-                  setCode('');
-                }}
-                className="mt-3 w-full text-center text-sm text-primary-600 hover:underline"
+                onClick={() => { setStep('phone'); setCode(''); }}
+                className="mt-3 w-full text-center text-sm text-gray-500 active:text-primary-600 min-h-[44px]"
               >
-                Change phone number
+                Change number
               </button>
+            </>
+          )}
+
+          {step === 'role' && (
+            <>
+              <h2 className="mb-5 text-center text-lg font-semibold">I am a...</h2>
+              <div className="space-y-3">
+                {ROLES.map((r) => (
+                  <button
+                    key={r.value}
+                    type="button"
+                    onClick={() => setSelectedRole(r.value)}
+                    className={`flex w-full items-center gap-4 rounded-xl border-2 p-4 min-h-[72px] text-left ${
+                      selectedRole === r.value
+                        ? 'border-primary-600 bg-primary-50'
+                        : 'border-gray-200'
+                    }`}
+                  >
+                    <div className={selectedRole === r.value ? 'text-primary-600' : 'text-gray-400'}>
+                      {r.icon}
+                    </div>
+                    <div>
+                      <p className="text-base font-bold text-gray-900">{r.label}</p>
+                      <p className="text-sm text-gray-500">{r.desc}</p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+              <Button
+                type="button"
+                className="mt-5 w-full"
+                size="lg"
+                loading={verifyOtp.isPending}
+                onClick={() => verifyOtp.mutate({ role: selectedRole })}
+              >
+                Continue
+              </Button>
             </>
           )}
         </form>

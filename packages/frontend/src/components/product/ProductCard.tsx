@@ -1,59 +1,168 @@
-import { Link } from 'react-router-dom';
-import { formatPrice } from '@/utils/formatters';
-import { mediaUrl } from '@/utils/mediaUrl';
+import { useCallback, useRef, useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Check } from 'lucide-react';
+import { mediaUrl, thumbUrl } from '@/utils/mediaUrl';
+import { formatPrice, formatDate } from '@/utils/formatters';
+import { useSelectionStore, type ShareOrderContext } from '@/store/selectionStore';
+import { useLongPress } from '@/hooks/useLongPress';
 import type { Product } from '@/types';
 
-export function ProductCard({ product }: { product: Product }) {
+interface ProductCardProps {
+  product: Product;
+  onVisible?: (id: string) => void;
+  onHidden?: (id: string) => void;
+  sharedBy?: string;
+  /** Trader Shared tab: recipients the product was sent to (Instagram-style pill). */
+  sharedWithLabel?: string;
+  /** When set, shows last-updated date (e.g. trader Recent tab). */
+  showUpdatedAt?: boolean;
+  /** Curated share context for checkout (order mode + trader). */
+  shareOrderContext?: ShareOrderContext;
+}
+
+export function ProductCard({
+  product,
+  onVisible,
+  onHidden,
+  sharedBy,
+  sharedWithLabel,
+  showUpdatedAt,
+  shareOrderContext,
+}: ProductCardProps) {
+  const navigate = useNavigate();
+  const { isSelecting, selectedIds, enterSelectionMode, toggleItem } = useSelectionStore();
+  const isSelected = selectedIds.has(product.id);
+  const cardRef = useRef<HTMLDivElement>(null);
+  const [imgLoaded, setImgLoaded] = useState(false);
+
+  useEffect(() => {
+    const el = cardRef.current;
+    if (!el || !onVisible) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) onVisible(product.id);
+        else onHidden?.(product.id);
+      },
+      { threshold: 0.5 },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [product.id, onVisible, onHidden]);
+
+  const onLongPress = useCallback(() => {
+    enterSelectionMode(product.id, shareOrderContext);
+  }, [product.id, enterSelectionMode, shareOrderContext]);
+
+  const longPress = useLongPress(onLongPress);
+
+  const handleClick = () => {
+    if (longPress.didFire()) return;
+    if (isSelecting) {
+      toggleItem(product.id);
+    } else {
+      navigate(`/products/${product.id}`, {
+        state: shareOrderContext
+          ? {
+              shareContext: shareOrderContext,
+              ...(product.traderOfferUnitPrice != null
+                ? { traderOfferUnitPrice: product.traderOfferUnitPrice }
+                : {}),
+            }
+          : undefined,
+      });
+    }
+  };
+
+  const img = (product.images ?? [])[0];
+  const traderOffer = product.traderOfferUnitPrice;
+  const listLabel = formatPrice(product.price, product.priceMax);
+  const priceLabel = traderOffer != null ? formatPrice(traderOffer) : listLabel;
+
   return (
-    <Link
-      to={`/products/${product.id}`}
-      className="group overflow-hidden rounded-xl bg-white shadow-sm transition-shadow hover:shadow-md"
+    <div
+      ref={cardRef}
+      role="button"
+      tabIndex={0}
+      onClick={handleClick}
+      onKeyDown={(e) => e.key === 'Enter' && handleClick()}
+      {...longPress}
+      className={`relative aspect-[3/4] cursor-pointer overflow-hidden rounded-xl bg-gray-100 select-none ${
+        isSelected ? 'ring-3 ring-primary-500' : ''
+      }`}
     >
-      <div className="aspect-square overflow-hidden bg-gray-100">
-        {(product.images ?? [])[0] ? (
-          <img
-            src={mediaUrl(product.images[0])}
-            alt={product.name}
-            className="h-full w-full object-cover transition-transform group-hover:scale-105"
-            loading="lazy"
-          />
-        ) : (
-          <div className="flex h-full items-center justify-center text-gray-400 text-sm">No image</div>
-        )}
-      </div>
-      {(product.images ?? []).length > 1 && (
-        <div className="flex gap-1 overflow-x-auto border-t border-gray-100 bg-gray-50/80 px-1.5 py-1.5">
-          {(product.images ?? []).slice(1).map((url, i) => (
-            <img
-              key={`${product.id}-extra-${i}`}
-              src={mediaUrl(url)}
-              alt=""
-              className="h-10 w-10 shrink-0 rounded-md object-cover ring-1 ring-gray-200/80"
-              loading="lazy"
-            />
-          ))}
+      {/* Skeleton placeholder until image loads */}
+      {img && !imgLoaded && (
+        <div className="absolute inset-0 animate-pulse bg-gray-200" />
+      )}
+      {img ? (
+        <img
+          src={thumbUrl(img)}
+          alt=""
+          className={`h-full w-full object-cover transition-opacity duration-200 ${imgLoaded ? 'opacity-100' : 'opacity-0'}`}
+          loading="lazy"
+          draggable={false}
+          onLoad={() => setImgLoaded(true)}
+          onError={(e) => {
+            const target = e.currentTarget;
+            if (target.src.includes('/thumbs/')) {
+              target.src = mediaUrl(img);
+            }
+          }}
+        />
+      ) : (
+        <div className="flex h-full items-center justify-center text-sm text-gray-400">
+          No image
         </div>
       )}
-      <div className="p-3">
-        <h3 className="text-sm font-medium text-gray-900 line-clamp-1">{product.name}</h3>
-        <p className="mt-0.5 text-xs text-gray-500">
-          {product.brand?.name && <span className="font-medium text-gray-600">{product.brand.name}</span>}
-          {product.brand?.name && product.vendor?.name && <span> &middot; </span>}
-          {product.vendor?.businessName || product.vendor?.name}
+
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-3 pb-2.5 pt-10">
+        <p className="text-[15px] font-bold text-white leading-tight">{priceLabel}</p>
+        {traderOffer != null && (
+          <p className="text-[11px] font-semibold text-emerald-200/95 leading-tight">Trader offer / unit</p>
+        )}
+        {traderOffer != null && product.price != null && Math.abs(traderOffer - product.price) > 1e-6 && (
+          <p className="text-[10px] text-white/65 line-through leading-tight">List {listLabel}</p>
+        )}
+        <p className="mt-0.5 text-[11px] text-white/70 leading-tight truncate">
+          {[product.name, product.category?.name].filter(Boolean).join(' · ') || `Min ${product.moq} pcs`}
         </p>
-        <div className="mt-2 flex items-center justify-between">
-          <span className="text-sm font-semibold text-primary-600">{formatPrice(product.price)}</span>
-          <span className="text-xs text-gray-400">MOQ: {product.moq}</span>
-        </div>
-        <div className="mt-1.5 flex flex-wrap gap-1">
-          {product.fabric && (
-            <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] text-gray-600">{product.fabric}</span>
-          )}
-          {product.pattern && (
-            <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] text-gray-600">{product.pattern}</span>
-          )}
-        </div>
+        {showUpdatedAt && product.updatedAt && (
+          <p className="mt-0.5 text-[10px] text-white/55 leading-tight">
+            Updated {formatDate(product.updatedAt)}
+          </p>
+        )}
       </div>
-    </Link>
+
+      {!isSelecting && (sharedWithLabel || sharedBy) && (
+        <div className="pointer-events-none absolute left-2 top-2 max-w-[calc(100%-1rem)] rounded-full bg-black/40 backdrop-blur-sm px-2 py-0.5">
+          <p className="text-[9px] font-semibold text-white/90 truncate">
+            {sharedWithLabel ? (
+              <>
+                <span className="text-white/70">To · </span>
+                {sharedWithLabel}
+              </>
+            ) : (
+              sharedBy
+            )}
+          </p>
+        </div>
+      )}
+
+      {isSelecting && !isSelected && (
+        <div className="pointer-events-none absolute inset-0 bg-white/20" />
+      )}
+
+      {isSelecting && (
+        <div
+          className={`absolute right-2.5 top-2.5 flex h-8 w-8 items-center justify-center rounded-full border-2 ${
+            isSelected
+              ? 'border-primary-600 bg-primary-600'
+              : 'border-white/80 bg-black/30'
+          }`}
+        >
+          {isSelected && <Check className="h-5 w-5 text-white" strokeWidth={3} />}
+        </div>
+      )}
+    </div>
   );
 }

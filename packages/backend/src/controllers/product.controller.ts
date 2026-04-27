@@ -54,6 +54,14 @@ export class ProductController {
     } catch (err) { next(err); }
   }
 
+  static async bulkUpdate(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { ids, categoryId, moq, status } = req.body;
+      const result = await ProductService.bulkUpdate(ids, req.user!.id, { categoryId, moq, status });
+      success(res, result, `${result.updated} product(s) updated`);
+    } catch (err) { next(err); }
+  }
+
   static async getCategories(_req: Request, res: Response, next: NextFunction) {
     try {
       const categories = await ProductService.getCategories();
@@ -65,6 +73,40 @@ export class ProductController {
     try {
       const options = await ProductService.getFilterOptions();
       success(res, options);
+    } catch (err) { next(err); }
+  }
+
+  static async feed(req: Request, res: Response, next: NextFunction) {
+    try {
+      const cursor = req.query.cursor as string | undefined;
+      const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 20;
+      const categoryId =
+        typeof req.query.categoryId === 'string' && req.query.categoryId.trim() !== ''
+          ? req.query.categoryId.trim()
+          : undefined;
+      const result = await ProductService.feed(req.user!.id, cursor, limit, categoryId);
+      success(res, result);
+    } catch (err) { next(err); }
+  }
+
+  static async saveProduct(req: Request, res: Response, next: NextFunction) {
+    try {
+      await ProductService.saveProduct(req.user!.id, req.body.productId);
+      success(res, null, 'Product saved');
+    } catch (err) { next(err); }
+  }
+
+  static async unsaveProduct(req: Request, res: Response, next: NextFunction) {
+    try {
+      await ProductService.unsaveProduct(req.user!.id, req.params.productId);
+      success(res, null, 'Product unsaved');
+    } catch (err) { next(err); }
+  }
+
+  static async getSavedProducts(req: Request, res: Response, next: NextFunction) {
+    try {
+      const products = await ProductService.getSavedProducts(req.user!.id);
+      success(res, products);
     } catch (err) { next(err); }
   }
 }

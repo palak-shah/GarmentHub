@@ -1,24 +1,31 @@
-import { NavLink } from 'react-router-dom';
-import { Home, Search, ShoppingCart, ClipboardList, Package, LayoutDashboard, Users, Tag, Settings, ListTree } from 'lucide-react';
+import { useCallback } from 'react';
+import { NavLink, useLocation } from 'react-router-dom';
+import { Home, Users, ClipboardList, LayoutDashboard, Package, Bookmark, User } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
-import { useCartStore } from '@/store/cartStore';
+import { useSelectionStore } from '@/store/selectionStore';
+import { queryClient } from '@/lib/queryClient';
+import { productApi } from '@/api/product.api';
+import { networkApi } from '@/api/network.api';
+import { orderApi } from '@/api/order.api';
+import { vendorApi } from '@/api/vendor.api';
 import type { Role } from '@/types';
+
+const HIDDEN_ON_ROUTES = ['/products/', '/bulk-order', '/trader/share'];
 
 interface NavItem {
   to: string;
   label: string;
   icon: React.ReactNode;
-  badge?: number;
 }
 
-function getNavItems(role: Role, cartCount: number): NavItem[] {
+function getNavItems(role: Role): NavItem[] {
   if (role === 'VENDOR') {
     return [
-      { to: '/vendor', label: 'Dashboard', icon: <LayoutDashboard className="h-5 w-5" /> },
-      { to: '/vendor/brands', label: 'Brands', icon: <Tag className="h-5 w-5" /> },
-      { to: '/vendor/catalog', label: 'Catalog', icon: <ListTree className="h-5 w-5" /> },
+      { to: '/vendor', label: 'Home', icon: <LayoutDashboard className="h-5 w-5" /> },
       { to: '/vendor/products', label: 'Products', icon: <Package className="h-5 w-5" /> },
+      { to: '/network', label: 'People', icon: <Users className="h-5 w-5" /> },
       { to: '/vendor/orders', label: 'Orders', icon: <ClipboardList className="h-5 w-5" /> },
+      { to: '/profile', label: 'Profile', icon: <User className="h-5 w-5" /> },
     ];
   }
   if (role === 'ADMIN') {
@@ -26,47 +33,77 @@ function getNavItems(role: Role, cartCount: number): NavItem[] {
       { to: '/admin', label: 'Dashboard', icon: <LayoutDashboard className="h-5 w-5" /> },
       { to: '/admin/users', label: 'Users', icon: <Users className="h-5 w-5" /> },
       { to: '/admin/orders', label: 'Orders', icon: <ClipboardList className="h-5 w-5" /> },
-      { to: '/admin/settings', label: 'Settings', icon: <Settings className="h-5 w-5" /> },
+      { to: '/profile', label: 'Profile', icon: <User className="h-5 w-5" /> },
     ];
   }
   return [
     { to: '/', label: 'Home', icon: <Home className="h-5 w-5" /> },
-    { to: '/search', label: 'Search', icon: <Search className="h-5 w-5" /> },
-    { to: '/cart', label: 'Cart', icon: <ShoppingCart className="h-5 w-5" />, badge: cartCount },
+    { to: '/saved', label: 'Saved', icon: <Bookmark className="h-5 w-5" /> },
+    { to: '/network', label: 'People', icon: <Users className="h-5 w-5" /> },
     { to: '/orders', label: 'Orders', icon: <ClipboardList className="h-5 w-5" /> },
+    { to: '/profile', label: 'Profile', icon: <User className="h-5 w-5" /> },
   ];
+}
+
+function prefetchForRoute(to: string) {
+  const userId = useAuthStore.getState().user?.id;
+  switch (to) {
+    case '/':
+      queryClient.prefetchQuery({ queryKey: ['categories'], queryFn: () => productApi.getCategories() });
+      break;
+    case '/saved':
+      queryClient.prefetchQuery({ queryKey: ['saved-products'], queryFn: () => productApi.getSavedProducts() });
+      break;
+    case '/network':
+      queryClient.prefetchQuery({ queryKey: ['network-connections'], queryFn: () => networkApi.getConnections() });
+      queryClient.prefetchQuery({ queryKey: ['network-suggestions'], queryFn: () => networkApi.getSuggestions() });
+      break;
+    case '/orders':
+      if (userId) queryClient.prefetchQuery({ queryKey: ['orders', userId], queryFn: () => orderApi.list() });
+      break;
+    case '/vendor':
+      if (userId) queryClient.prefetchQuery({ queryKey: ['vendor-products', userId], queryFn: () => productApi.getMyProducts() });
+      break;
+    case '/vendor/products':
+      if (userId) queryClient.prefetchQuery({ queryKey: ['vendor-products', userId], queryFn: () => productApi.getMyProducts() });
+      break;
+    case '/vendor/orders':
+      if (userId) queryClient.prefetchQuery({ queryKey: ['vendor-orders', userId], queryFn: () => vendorApi.getIncomingOrders() });
+      break;
+  }
 }
 
 export function BottomNav() {
   const role = useAuthStore((s) => s.user?.role);
-  const cartCount = useCartStore((s) => s.items.length);
+  const isSelecting = useSelectionStore((s) => s.isSelecting);
+  const { pathname } = useLocation();
 
-  if (!role) return null;
+  const prefetch = useCallback((to: string) => {
+    prefetchForRoute(to);
+  }, []);
 
-  const items = getNavItems(role, cartCount);
+  const hiddenByRoute = HIDDEN_ON_ROUTES.some((r) => pathname.startsWith(r));
+  if (!role || isSelecting || hiddenByRoute) return null;
+
+  const items = getNavItems(role);
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-30 border-t border-gray-200 bg-white pb-[env(safe-area-inset-bottom)]">
+    <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-gray-100 bg-white" style={{ paddingBottom: 'max(8px, env(safe-area-inset-bottom, 0px))' }}>
       <div className="mx-auto flex max-w-4xl">
         {items.map((item) => (
           <NavLink
             key={item.to}
             to={item.to}
-            end={item.to === '/' || item.to === '/vendor' || item.to === '/admin'}
+            end={item.to === '/' || item.to === '/vendor' || item.to === '/admin' || item.to === '/profile'}
+            onTouchStart={() => prefetch(item.to)}
+            onMouseEnter={() => prefetch(item.to)}
             className={({ isActive }) =>
-              `flex flex-1 flex-col items-center gap-0.5 py-2 text-xs transition-colors ${
-                isActive ? 'text-primary-600' : 'text-gray-500 hover:text-gray-700'
+              `flex flex-1 flex-col items-center gap-0.5 py-1.5 text-[10px] font-medium min-h-[48px] justify-center transition-colors ${
+                isActive ? 'text-primary-600' : 'text-gray-400'
               }`
             }
           >
-            <div className="relative">
-              {item.icon}
-              {item.badge ? (
-                <span className="absolute -right-2 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-primary-600 text-[10px] font-bold text-white">
-                  {item.badge}
-                </span>
-              ) : null}
-            </div>
+            {item.icon}
             <span>{item.label}</span>
           </NavLink>
         ))}

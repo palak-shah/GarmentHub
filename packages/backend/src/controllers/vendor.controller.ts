@@ -19,6 +19,20 @@ export class VendorController {
     } catch (err) { next(err); }
   }
 
+  static async bulkRespondToItems(req: Request, res: Response, next: NextFunction) {
+    try {
+      const result = await VendorService.bulkRespondToItems(req.user!.id, req.body);
+      success(res, result, 'Responses recorded');
+    } catch (err) { next(err); }
+  }
+
+  static async respondToTraderPrice(req: Request, res: Response, next: NextFunction) {
+    try {
+      const result = await VendorService.respondToTraderPrice(req.params.itemId, req.user!.id, req.body);
+      success(res, result, 'Price response recorded');
+    } catch (err) { next(err); }
+  }
+
   static async listCategories(req: Request, res: Response, next: NextFunction) {
     try {
       const categories = await CatalogService.listCategoriesForVendor(req.user!.id);

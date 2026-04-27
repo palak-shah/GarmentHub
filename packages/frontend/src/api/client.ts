@@ -22,7 +22,22 @@ api.interceptors.request.use((config) => {
 });
 
 api.interceptors.response.use(
-  (res) => res,
+  (res) => {
+    const ct = String(res.headers['content-type'] ?? '');
+    const data = res.data;
+    if (
+      ct.includes('text/html') &&
+      typeof data === 'string' &&
+      (data.includes('<!DOCTYPE') || data.includes('<html'))
+    ) {
+      return Promise.reject(
+        new Error(
+          'API returned a web page instead of JSON. Start the backend (e.g. port 4000) and use the Vite dev proxy.',
+        ),
+      );
+    }
+    return res;
+  },
   (err) => {
     if (err.response?.status === 401) {
       useAuthStore.getState().logout();

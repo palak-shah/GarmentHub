@@ -45,7 +45,7 @@ export default function VendorCatalog() {
     onError: () => toast.error('Could not remove'),
   });
 
-  if (!userId || isLoading) return <PageSpinner />;
+  if (!userId || isLoading) return <><Header title="My catalog attributes" showBack /><PageSpinner /></>;
 
   return (
     <>

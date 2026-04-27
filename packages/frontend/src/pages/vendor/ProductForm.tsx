@@ -38,8 +38,9 @@ export default function ProductForm() {
 
   const [form, setForm] = useState({
     name: '', brandId: '', categoryId: '', pattern: '', fabric: '', color: '',
-    price: '', moq: '1', status: 'ACTIVE' as 'ACTIVE' | 'DRAFT',
+    price: '', priceMax: '', moq: '1', status: 'ACTIVE' as 'ACTIVE' | 'DRAFT',
   });
+  const [priceMode, setPriceMode] = useState<'fixed' | 'range'>('fixed');
   const [imageUrls, setImageUrls] = useState<string[]>([]);
   const [uploadingImages, setUploadingImages] = useState(false);
   const [uploadBatchCount, setUploadBatchCount] = useState(0);
@@ -92,10 +93,12 @@ export default function ProductForm() {
 
   useEffect(() => {
     if (!product || !isEdit) return;
-    const serverKey = `${product.updatedAt?.toString() ?? ''}`;
+    const imgSig = (product.images ?? []).join('\u001f');
+    const serverKey = `${product.updatedAt?.toString() ?? ''}\u001f${imgSig}`;
     if (lastHydratedServerVersion.get(product.id) === serverKey) return;
     lastHydratedServerVersion.set(product.id, serverKey);
 
+    const hasRange = product.priceMax != null && product.priceMax > (product.price ?? 0);
     setForm({
       name: product.name,
       brandId: product.brandId,
@@ -104,9 +107,11 @@ export default function ProductForm() {
       fabric: product.fabric || '',
       color: product.color || '',
       price: product.price?.toString() || '',
+      priceMax: product.priceMax?.toString() || '',
       moq: product.moq.toString(),
       status: product.status === 'ARCHIVED' ? 'DRAFT' : product.status,
     });
+    setPriceMode(hasRange ? 'range' : 'fixed');
     setImageUrls(Array.isArray(product.images) ? [...product.images] : []);
     setAttrValues(
       product.attributeValues && typeof product.attributeValues === 'object'
@@ -222,11 +227,15 @@ export default function ProductForm() {
       return;
     }
 
+    const parsedPrice = form.price ? parseFloat(form.price) : undefined;
+    const parsedPriceMax = priceMode === 'range' && form.priceMax ? parseFloat(form.priceMax) : undefined;
+
     const base: Record<string, unknown> = {
       name: form.name,
       brandId: form.brandId,
       categoryId: form.categoryId,
-      price: form.price ? parseFloat(form.price) : undefined,
+      price: parsedPrice,
+      priceMax: parsedPriceMax ?? null,
       moq: parseInt(form.moq) || 1,
       status: form.status,
       images: imageUrls,
@@ -323,22 +332,50 @@ export default function ProductForm() {
           </div>
         )}
 
-        <div className="grid grid-cols-2 gap-3">
-          <Input label="Price (₹)" type="number" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} placeholder="Optional" />
-          <Input label="MOQ" type="number" value={form.moq} onChange={(e) => setForm({ ...form, moq: e.target.value })} />
-          <div className="space-y-1">
-            <label className="block text-sm font-medium text-gray-700">Status</label>
-            <select
-              value={form.status}
-              onChange={(e) => setForm({ ...form, status: e.target.value as 'ACTIVE' | 'DRAFT' })}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
-            >
-              <option value="ACTIVE">Active</option>
-              <option value="DRAFT">Draft</option>
-            </select>
-            <p className="text-xs text-gray-500">
-              Draft products are hidden from buyer Search and the home catalog. Use Active when buyers should see this product.
-            </p>
+        <div className="space-y-3">
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="block text-sm font-medium text-gray-700">Price (₹)</label>
+              <div className="flex rounded-full bg-gray-100 p-0.5">
+                <button
+                  type="button"
+                  onClick={() => { setPriceMode('fixed'); setForm((f) => ({ ...f, priceMax: '' })); }}
+                  className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${priceMode === 'fixed' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}
+                >
+                  Fixed
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPriceMode('range')}
+                  className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${priceMode === 'range' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}
+                >
+                  Range
+                </button>
+              </div>
+            </div>
+            {priceMode === 'fixed' ? (
+              <Input type="number" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} placeholder="e.g. 450" />
+            ) : (
+              <div className="flex gap-2">
+                <Input type="number" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} placeholder="Min" />
+                <span className="flex items-center text-gray-400 text-sm font-medium">–</span>
+                <Input type="number" value={form.priceMax} onChange={(e) => setForm({ ...form, priceMax: e.target.value })} placeholder="Max" />
+              </div>
+            )}
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Input label="MOQ" type="number" value={form.moq} onChange={(e) => setForm({ ...form, moq: e.target.value })} />
+            <div className="space-y-1">
+              <label className="block text-sm font-medium text-gray-700">Status</label>
+              <select
+                value={form.status}
+                onChange={(e) => setForm({ ...form, status: e.target.value as 'ACTIVE' | 'DRAFT' })}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
+              >
+                <option value="ACTIVE">Active</option>
+                <option value="DRAFT">Draft</option>
+              </select>
+            </div>
           </div>
         </div>
 
@@ -368,12 +405,15 @@ export default function ProductForm() {
               setUploadBatchCount(files.length);
               setUploadingImages(true);
               try {
-                const { urls } = await uploadApi.postProductImages(files);
+                const { urls } = await uploadApi.postProductImages(files, isEdit && id ? id : undefined);
                 if (urls.length === 0) {
                   toast.error('No images were saved. Check that the API is running and you are logged in as a vendor.');
                   return;
                 }
                 setImageUrls((prev) => [...prev, ...urls]);
+                if (isEdit && id) {
+                  queryClient.invalidateQueries({ queryKey: ['vendor-products'] });
+                }
                 toast.success(urls.length === 1 ? 'Photo added' : `${urls.length} photos added`);
               } catch (e) {
                 console.error(e);

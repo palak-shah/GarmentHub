@@ -9,7 +9,8 @@ import type { ApiResponse } from '@/types';
  * With `fetch` + `FormData`, the browser sets `multipart/form-data` and the boundary.
  */
 export const uploadApi = {
-  postProductImages: async (files: File[]): Promise<{ urls: string[] }> => {
+  /** When `productId` is set, the server appends images to that product and refreshes `updatedAt`. */
+  postProductImages: async (files: File[], productId?: string): Promise<{ urls: string[] }> => {
     const token = useAuthStore.getState().token;
     if (!token) {
       throw new Error('You are not signed in. Log in as a vendor to upload images.');
@@ -18,6 +19,9 @@ export const uploadApi = {
     const fd = new FormData();
     for (const f of files) {
       fd.append('files', f);
+    }
+    if (productId?.trim()) {
+      fd.append('productId', productId.trim());
     }
 
     let res: Response;

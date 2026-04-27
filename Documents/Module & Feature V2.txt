@@ -1,0 +1,255 @@
+# GarmentHub - Module & Feature Specification (Final v2)
+
+---
+
+## 1. User Management Module
+
+### Features:
+- OTP-based login
+- Roles:
+  - Customer
+  - Vendor
+  - Trader
+  - Admin
+- Profile:
+  - Name
+  - Business name
+  - Contact details
+- Role-based access
+
+---
+
+## 2. Network Module (Core Backbone)
+
+### Connection System:
+- Trader → Follow Vendors
+- Customer → Follow Traders
+- Vendor → Connect with Traders
+
+### Discovery:
+- Search users (Trader, Vendor, Customer)
+- View basic profile
+
+### Invite System:
+- Invite via link (WhatsApp-friendly)
+- Auto-connect on signup
+
+### Controls:
+- Follow / Unfollow
+- Mute
+- Prioritize connections
+
+---
+
+## 3. Vendor Catalog Module (Bulk-first)
+
+### Features:
+- Bulk upload (50–200 images)
+- Drag & drop (web)
+- Multi-select products
+- Bulk actions:
+  - Tag category
+  - Apply MOQ
+  - Delete
+  - Activate/Deactivate
+- Minimal fields:
+  - Images
+  - Category
+  - Attributes
+  - MOQ
+  - Price (optional)
+
+---
+
+## 4. Feed Module (Inbox + Feed Hybrid)
+
+### Vendor → Trader Feed:
+- Real-time uploads grouped as:
+  - “Today’s Collection”
+- Sections:
+  - New (unseen)
+  - Seen
+  - Actioned
+
+### Trader → Customer Feed:
+- Curated products (priority)
+- Passive updates (secondary)
+
+### Features:
+- Image-first grid
+- Filters:
+  - Vendor
+  - Category
+  - Date
+- Seen / Unseen tracking
+- Resume where left
+
+---
+
+## 5. Trader Curation Module
+
+### Features:
+- View vendor uploads
+- Multi-select products
+- Bulk share
+- Add notes
+
+### Order Mode Selection:
+- Managed Mode
+- Direct Mode (observe)
+
+---
+
+## 6. Product Detail Module
+
+### Features:
+- Images (zoom + swipe)
+- Attributes
+- MOQ
+- Price
+
+### Identity Layer:
+- Shared by (Trader)
+- Vendor visible
+
+### Actions:
+- Order via Trader (primary)
+- Contact Vendor (secondary)
+
+---
+
+## 7. Bulk Selection System (Global Feature)
+
+### Available everywhere:
+- Long press → multi-select
+- Bulk actions:
+  - Share
+  - Order
+  - Delete
+  - Save
+
+---
+
+## 8. Cart & Bulk Order Module
+
+### Features:
+
+#### Bulk Ordering:
+- Select multiple products
+
+#### Quantity Input Options:
+1. Same quantity:
+   - “100 each”
+2. Group quantity:
+   - Group A → 100 each
+   - Group B → 50 each
+3. Grid edit (advanced)
+
+### Output:
+- Single combined order
+- System splits internally
+
+---
+
+## 9. Order Management Module
+
+### Features:
+- Status:
+  - Pending
+  - Accepted
+  - Partially Accepted
+  - Rejected
+- Track:
+  - Requested qty
+  - Approved qty
+
+---
+
+## 10. Dual Order Flow Module
+
+### Managed Mode:
+Customer → Trader → Vendor
+
+### Direct Mode:
+Customer ↔ Vendor  
+Trader in visibility loop
+
+---
+
+## 11. Vendor Response Module
+
+### Features:
+- Accept
+- Reject
+- Alter quantity
+- Add note
+
+---
+
+## 12. Trader Intervention Module
+
+### Triggers:
+- Vendor rejection
+- No response
+- Customer inactivity
+
+### Action:
+- “Take Control”
+
+---
+
+## 13. Workflow State Tracking Module (VERY IMPORTANT)
+
+For each product-user:
+- Unseen
+- Seen
+- Shared
+- Ordered
+- Skipped
+
+---
+
+## 14. Notification Module
+
+### Features:
+- Batched notifications:
+  - “Vendor uploaded 25 items”
+- Event-based alerts:
+  - Orders
+  - Responses
+  - Intervention triggers
+
+---
+
+## 15. Performance Module
+
+### Features:
+- Image compression
+- Lazy loading
+- Thumbnail-first loading
+- Fast scrolling
+
+---
+
+## 16. Admin Module
+
+### Features:
+- Manage users
+- Manage categories
+- View orders
+- Basic analytics
+
+---
+
+## 17. Order History Module
+
+### Features:
+- Customer:
+  - Past orders
+  - Reorder
+- Vendor:
+  - Requests history
+- Trader:
+  - Managed + observed orders
+
+---

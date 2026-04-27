@@ -1,8 +1,9 @@
 import api from './client';
-import type { ApiResponse, Product, PaginatedResponse, FilterOptions, Category } from '@/types';
+import type { ApiResponse, Product, PaginatedResponse, FilterOptions, Category, FeedResponse } from '@/types';
 
 export interface ProductQuery {
   search?: string;
+  vendorId?: string;
   brandId?: string;
   categoryId?: string;
   pattern?: string;
@@ -36,9 +37,24 @@ export const productApi = {
   bulkDelete: (ids: string[]) =>
     api.post<ApiResponse<{ deleted: number }>>('/products/bulk-delete', { ids }).then((r) => r.data.data),
 
+  bulkUpdate: (ids: string[], updates: { categoryId?: string; moq?: number; status?: string }) =>
+    api.put<ApiResponse<{ updated: number }>>('/products/bulk-update', { ids, ...updates }).then((r) => r.data.data),
+
   getCategories: () =>
     api.get<ApiResponse<Category[]>>('/products/categories').then((r) => r.data.data),
 
   getFilters: () =>
     api.get<ApiResponse<FilterOptions>>('/products/filters').then((r) => r.data.data),
+
+  feed: (params: { cursor?: string; limit?: number; categoryId?: string } = {}) =>
+    api.get<ApiResponse<FeedResponse>>('/products/feed', { params }).then((r) => r.data.data),
+
+  saveProduct: (productId: string) =>
+    api.post<ApiResponse<null>>('/products/save', { productId }).then((r) => r.data),
+
+  unsaveProduct: (productId: string) =>
+    api.delete<ApiResponse<null>>(`/products/save/${productId}`).then((r) => r.data),
+
+  getSavedProducts: () =>
+    api.get<ApiResponse<Product[]>>('/products/saved').then((r) => r.data.data),
 };

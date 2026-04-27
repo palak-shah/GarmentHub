@@ -5,8 +5,8 @@ export const authApi = {
   sendOtp: (phone: string) =>
     api.post<ApiResponse<{ message: string }>>('/auth/send-otp', { phone }).then((r) => r.data.data),
 
-  verifyOtp: (phone: string, code: string) =>
-    api.post<ApiResponse<{ token: string; user: User; isNewUser: boolean }>>('/auth/verify-otp', { phone, code }).then((r) => r.data.data),
+  verifyOtp: (phone: string, code: string, role?: 'CUSTOMER' | 'VENDOR' | 'TRADER') =>
+    api.post<ApiResponse<{ token: string; user: User; isNewUser: boolean }>>('/auth/verify-otp', { phone, code, role }).then((r) => r.data.data),
 
   getProfile: () =>
     api.get<ApiResponse<User>>('/auth/me').then((r) => r.data.data),

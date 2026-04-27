@@ -1,4 +1,4 @@
-export type Role = 'CUSTOMER' | 'VENDOR' | 'ADMIN';
+export type Role = 'CUSTOMER' | 'VENDOR' | 'TRADER' | 'ADMIN';
 export type ProductStatus = 'ACTIVE' | 'DRAFT' | 'ARCHIVED';
 export type OrderStatus = 'PENDING' | 'ACCEPTED' | 'PARTIALLY_ACCEPTED' | 'REJECTED' | 'CONFIRMED' | 'CANCELLED';
 export type ItemStatus = 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'ALTERED' | 'CONFIRMED';
@@ -64,9 +64,14 @@ export interface Product {
   attributeValues?: Record<string, string>;
   displayAttributes?: { label: string; value: string }[];
   price?: number;
+  priceMax?: number;
+  /** From curated share: trader's offered unit price for this product line. */
+  traderOfferUnitPrice?: number | null;
   moq: number;
   status: ProductStatus;
-  vendor: { id: string; name: string; businessName?: string };
+  traderId?: string;
+  trader?: { id: string; name: string; businessName?: string } | null;
+  vendor: { id: string; name: string; businessName?: string; phone?: string };
   createdAt: string;
   updatedAt: string;
 }
@@ -81,30 +86,71 @@ export interface OrderItem {
   status: ItemStatus;
   vendorNote?: string;
   respondedAt?: string;
+  offeredUnitPrice?: number | null;
+  /** Trader's favored unit price for the line (before/alongside vendor responses). */
+  traderTargetUnitPrice?: number | null;
+  traderCounterUnitPrice?: number | null;
+  agreedUnitPrice?: number | null;
   createdAt?: string;
-  product: Pick<Product, 'id' | 'name' | 'images' | 'price'> & { moq?: number };
+  product: Pick<Product, 'id' | 'name' | 'images' | 'price' | 'priceMax'> & { moq?: number };
   vendor: { id: string; name: string; businessName?: string };
   order?: {
     id: string;
     status: OrderStatus;
     createdAt: string;
+    orderMode?: OrderMode;
+    customerNeedBy?: string | null;
     customer: { id: string; name: string; businessName?: string };
+    trader?: { id: string; name: string; businessName?: string } | null;
   };
 }
+
+export type OrderMode = 'DIRECT' | 'MANAGED';
+export type WorkflowState = 'UNSEEN' | 'SEEN' | 'SHARED' | 'ORDERED' | 'SKIPPED';
 
 export interface Order {
   id: string;
   customerId: string;
+  traderId?: string;
+  orderMode?: OrderMode;
   status: OrderStatus;
   note?: string;
+  /** End of chosen need-by calendar day (UTC); optional. */
+  customerNeedBy?: string | null;
+  /** Managed: set when trader forwards to vendors; null means vendors do not see the order yet. */
+  releasedToVendorsAt?: string | null;
   createdAt: string;
   items: OrderItem[];
   customer: { id: string; name: string; businessName?: string; phone?: string };
+  trader?: { id: string; name: string; businessName?: string } | null;
 }
 
-export interface CartItem {
-  product: Product;
-  quantity: number;
+export interface CuratedShare {
+  id: string;
+  trader: { id: string; name: string; businessName?: string };
+  note?: string;
+  orderMode: OrderMode;
+  createdAt: string;
+  isRead: boolean;
+  /** Products may include `traderOfferUnitPrice` from the share line. */
+  products: Product[];
+}
+
+export interface Notification {
+  id: string;
+  type: string;
+  title: string;
+  body: string;
+  referenceId?: string;
+  isRead: boolean;
+  createdAt: string;
+}
+
+export interface FeedResponse {
+  newProducts: Product[];
+  pendingProducts: Product[];
+  doneProducts: Product[];
+  nextCursor: string | null;
 }
 
 export interface ApiResponse<T> {

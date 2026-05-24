@@ -20,7 +20,13 @@ const app = express();
 
 ensureUploadDirs();
 
-app.use(cors());
+app.use(
+  cors(
+    env.corsOrigins.length > 0
+      ? { origin: env.corsOrigins }
+      : { origin: true },
+  ),
+);
 app.use('/uploads', express.static(UPLOADS_ROOT));
 // Multipart uploads must run before express.json() (belt-and-suspenders for body parsing).
 app.use('/api/upload', uploadRoutes);

@@ -44,6 +44,7 @@ Run these from the **repository root**:
    - `DATABASE_URL` — PostgreSQL connection string (user, password, host, port, database name)
    - `JWT_SECRET` — a long random string in production
    - `PORT` — API port (default **4000**)
+   - `CORS_ORIGINS` — comma-separated browser origins allowed to call the API when the UI is on another host (see `packages/backend/.env.example`)
 
 3. **Prisma client and schema:**
 
@@ -85,7 +86,7 @@ This runs `tsx watch src/index.ts` with hot reload.
 
 ### Frontend (Vite)
 
-The dev server is at **`http://localhost:3000`**. It **proxies `/api`** to **`http://localhost:4000`**, so start the backend first for full app behavior.
+The dev server is at **`http://localhost:3000`**. By default the app uses same-origin **`/api`**, which Vite **proxies** to **`http://localhost:4000`** (override with `DEV_PROXY_TARGET` in `packages/frontend/.env`). For split hosts (UI and API on different domains), set **`VITE_API_ORIGIN`** to the API base URL and **`CORS_ORIGINS`** on the backend to include the UI origin. See `packages/frontend/.env.example` and [START-SERVERS.md](START-SERVERS.md).
 
 **From repository root (recommended):**
 
@@ -121,7 +122,7 @@ npm run dev
 
 - **`npm` not found** — install Node.js and ensure it is on your `PATH` (on Windows, restart the terminal after installing).
 - **Database errors** — check `DATABASE_URL` in `packages/backend/.env` and that PostgreSQL is running.
-- **API 404 or CORS in the browser** — open the app via the Vite URL on port **3000**, not `file://`; the dev server proxies `/api` to the backend.
+- **API 404 or CORS in the browser** — use the Vite URL on port **3000** for same-origin `/api`, or configure `VITE_API_ORIGIN` + `CORS_ORIGINS` for split hosts; see [START-SERVERS.md](START-SERVERS.md).
 - **Port in use** — stop the process using **4000** (backend) or **3000** (frontend), or change `PORT` / Vite `server.port` in `packages/frontend/vite.config.ts`.
 
 ## Project Structure

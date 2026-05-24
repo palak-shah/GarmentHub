@@ -2,8 +2,12 @@ import axios, { AxiosHeaders } from 'axios';
 import { useAuthStore } from '@/store/authStore';
 import { clearSessionQueryData } from '@/lib/sessionQueries';
 
+/** When set (e.g. prod), call the API host directly. When unset, use same-origin `/api` (Vite dev proxy or edge proxy). */
+const apiOrigin = import.meta.env.VITE_API_ORIGIN?.replace(/\/$/, '');
+const baseURL = apiOrigin ? `${apiOrigin}/api` : '/api';
+
 const api = axios.create({
-  baseURL: '/api',
+  baseURL,
   headers: { 'Content-Type': 'application/json' },
 });
 

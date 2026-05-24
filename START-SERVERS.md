@@ -41,6 +41,7 @@ Run these from the **repository root**:
    - `DATABASE_URL` — PostgreSQL connection string (user, password, host, port, database name)
    - `JWT_SECRET` — a long random string in production
    - `PORT` — API port (default **4000**)
+   - `CORS_ORIGINS` — comma-separated browser origins allowed to call the API (required when the UI is on another host). Example: `https://garmenthub.in,https://www.garmenthub.in` for production, or `http://localhost:3000,http://127.0.0.1:3000` for local dev if the frontend calls the API directly.
 
 3. **Prisma client and schema:**
 
@@ -82,7 +83,12 @@ This runs `tsx watch src/index.ts` with hot reload.
 
 ## Frontend (Vite)
 
-The dev server is at **`http://localhost:3000`**. It **proxies `/api`** to **`http://localhost:4000`**, so start the backend first for full app behavior.
+The dev server is at **`http://localhost:3000`**.
+
+- **Same-origin API (default):** leave `VITE_API_ORIGIN` unset. The app calls `/api` and Vite **proxies** `/api` and `/uploads` to **`http://localhost:4000`** (override with `DEV_PROXY_TARGET` in `packages/frontend/.env`).
+- **Split hosts (like production):** set `VITE_API_ORIGIN` (e.g. `https://service.garmenthub.in` or `http://localhost:4000`) in `packages/frontend/.env` and ensure `CORS_ORIGINS` on the backend includes your UI origin (e.g. `http://localhost:3000`).
+
+Copy `packages/frontend/.env.example` to `.env` / `.env.local` and adjust. For production builds, set `VITE_API_ORIGIN` and `VITE_PUBLIC_API_ORIGIN` to your API host (see `.env.example`).
 
 **From repository root (recommended):**
 
@@ -124,5 +130,5 @@ npm run dev
 
 - **`npm` not found** — install Node.js and ensure it is on your `PATH` (on Windows, restart the terminal after installing).
 - **Database errors** — check `DATABASE_URL` in `packages/backend/.env` and that PostgreSQL is running.
-- **API 404 or CORS in the browser** — open the app via the Vite URL on port **3000**, not `file://`; the dev server proxies `/api` to the backend.
+- **API 404 or CORS in the browser** — if you use same-origin `/api`, open the app via the Vite URL on port **3000**, not `file://`. If the UI and API are on different hosts, set `VITE_API_ORIGIN` on the frontend and `CORS_ORIGINS` on the backend for your UI origin. Remove any **HTTP redirect** from the static site’s `/api` to the API host when using direct API calls (the browser should request `service…` only when configured, not via redirect).
 - **Port in use** — stop the process using **4000** (backend) or **3000** (frontend), or change `PORT` / Vite `server.port` in `packages/frontend/vite.config.ts`.

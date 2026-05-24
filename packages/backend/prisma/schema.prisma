@@ -63,6 +63,8 @@ model User {
   curatedSharesReceived    CuratedShareRecipient[] @relation("curatedSharesReceived")
   productStates            UserProductState[]
   inviteCode               String?         @unique
+  traderCustomerGroups     CustomerGroup[] @relation("TraderCustomerGroups")
+  customerGroupMemberships CustomerGroupMember[]
 
   @@map("users")
 }
@@ -128,6 +130,21 @@ model Brand {
   @@map("brands")
 }
 
+model ProductImage {
+  id        String   @id @default(cuid())
+  productId String
+  url       String
+  createdAt DateTime @default(now())
+
+  product           Product               @relation(fields: [productId], references: [id], onDelete: Cascade)
+  curatedShareLines CuratedShareProduct[]
+  orderItems        OrderItem[]
+
+  @@unique([productId, url])
+  @@index([productId, createdAt(sort: Desc)])
+  @@map("product_images")
+}
+
 model Product {
   id              String        @id @default(cuid())
   vendorId        String
@@ -155,6 +172,7 @@ model Product {
   savedProducts       SavedProduct[]
   curatedShareItems   CuratedShareProduct[]
   userProductStates   UserProductState[]
+  imageAssets         ProductImage[]
 
   @@index([vendorId])
   @@index([traderId])
@@ -214,10 +232,14 @@ model OrderItem {
   order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
   product Product @relation(fields: [productId], references: [id])
   vendor  User    @relation(fields: [vendorId], references: [id])
+  /** Optional: which shared catalog photo this line refers to. */
+  productImageId String?
+  productImage   ProductImage? @relation(fields: [productImageId], references: [id], onDelete: SetNull)
 
   @@index([orderId])
   @@index([vendorId])
   @@index([status])
+  @@index([productImageId])
   @@map("order_items")
 }
 
@@ -304,6 +326,34 @@ model UserProductState {
   @@map("user_product_states")
 }
 
+model CustomerGroup {
+  id        String   @id @default(cuid())
+  traderId  String
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  trader  User                  @relation("TraderCustomerGroups", fields: [traderId], references: [id], onDelete: Cascade)
+  members CustomerGroupMember[]
+
+  @@index([traderId])
+  @@map("customer_groups")
+}
+
+model CustomerGroupMember {
+  id         String   @id @default(cuid())
+  groupId    String
+  customerId String
+  createdAt  DateTime @default(now())
+
+  group    CustomerGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  customer User          @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, customerId])
+  @@index([customerId])
+  @@map("customer_group_members")
+}
+
 model CuratedShare {
   id         String    @id @default(cuid())
   traderId   String
@@ -320,16 +370,17 @@ model CuratedShare {
 }
 
 model CuratedShareProduct {
-  id             String @id @default(cuid())
+  id             String  @id @default(cuid())
   curatedShareId String
   productId      String
+  productImageId String?
   /** Trader's favored unit price for this share line (buyer sees this when ordering from the share). */
   traderOfferUnitPrice Float?
 
   curatedShare CuratedShare @relation(fields: [curatedShareId], references: [id], onDelete: Cascade)
   product      Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
+  productImage ProductImage? @relation(fields: [productImageId], references: [id], onDelete: SetNull)
 
-  @@unique([curatedShareId, productId])
   @@index([productId])
   @@map("curated_share_products")
 }

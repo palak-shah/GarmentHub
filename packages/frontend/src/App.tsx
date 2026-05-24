@@ -7,6 +7,7 @@ import CustomerHome from '@/pages/customer/Home';
 import ProductListing from '@/pages/customer/ProductListing';
 import ProductDetail from '@/pages/customer/ProductDetail';
 import BulkOrder from '@/pages/customer/BulkOrder';
+import CustomerSharedGallery from '@/pages/customer/CustomerSharedGallery';
 import CustomerOrders from '@/pages/customer/Orders';
 import OrderDetail from '@/pages/customer/OrderDetail';
 import SavedProducts from '@/pages/customer/SavedProducts';
@@ -14,6 +15,9 @@ import NetworkPage from '@/pages/Network';
 import NotificationsPage from '@/pages/Notifications';
 import ProfilePage from '@/pages/Profile';
 import ShareProducts from '@/pages/trader/ShareProducts';
+import TraderProductGallery from '@/pages/trader/TraderProductGallery';
+import CustomerGroups from '@/pages/trader/CustomerGroups';
+import CustomerGroupDetail from '@/pages/trader/CustomerGroupDetail';
 
 import VendorDashboard from '@/pages/vendor/Dashboard';
 import VendorBrandList from '@/pages/vendor/BrandList';
@@ -28,6 +32,7 @@ import UserManagement from '@/pages/admin/UserManagement';
 import AdminOrderOverview from '@/pages/admin/OrderOverview';
 import SettingsCategories from '@/pages/admin/SettingsCategories';
 import VendorCatalog from '@/pages/vendor/VendorCatalog';
+import TraderInsights from '@/pages/vendor/TraderInsights';
 import { RequireVendor } from '@/components/auth/RequireVendor';
 import { RequireCustomer } from '@/components/auth/RequireCustomer';
 
@@ -47,17 +52,22 @@ export default function App() {
         {/* Customer / Trader */}
         <Route path="/" element={<RoleRedirect />} />
         <Route path="/search" element={<ProductListing />} />
-        <Route path="/products/:id" element={<ProductDetail />} />
+        <Route path="/products/:id/gallery" element={<TraderProductGallery />} />
         <Route element={<RequireCustomer />}>
           <Route path="/bulk-order" element={<BulkOrder />} />
         </Route>
+        <Route path="/products/:id/customer-shared" element={<CustomerSharedGallery />} />
+        <Route path="/products/:id" element={<ProductDetail />} />
         <Route path="/network" element={<NetworkPage />} />
+        <Route path="/network/traders/:traderId" element={<TraderInsights />} />
         <Route path="/orders" element={<CustomerOrders />} />
         <Route path="/orders/:id" element={<OrderDetail />} />
         <Route path="/saved" element={<SavedProducts />} />
         <Route path="/notifications" element={<NotificationsPage />} />
         <Route path="/profile" element={<ProfilePage />} />
         <Route path="/trader/share" element={<ShareProducts />} />
+        <Route path="/trader/groups" element={<CustomerGroups />} />
+        <Route path="/trader/groups/:groupId" element={<CustomerGroupDetail />} />
 
         {/* Vendor */}
         <Route element={<RequireVendor />}>

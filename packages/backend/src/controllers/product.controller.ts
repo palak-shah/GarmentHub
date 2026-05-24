@@ -19,6 +19,16 @@ export class ProductController {
     } catch (err) { next(err); }
   }
 
+  /** Minimal payload for trader photo grid only (faster than full `getById`). */
+  static async getTraderGallery(req: Request, res: Response, next: NextFunction) {
+    try {
+      const product = await ProductService.getTraderGallery(req.params.id);
+      success(res, product);
+    } catch (err) {
+      next(err);
+    }
+  }
+
   static async getMyProducts(req: Request, res: Response, next: NextFunction) {
     try {
       const products = await ProductService.getByVendor(req.user!.id);

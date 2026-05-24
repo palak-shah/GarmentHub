@@ -1,11 +1,15 @@
 import { useCallback, useRef, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { Check } from 'lucide-react';
 import { mediaUrl, thumbUrl } from '@/utils/mediaUrl';
 import { formatPrice, formatDate } from '@/utils/formatters';
 import { useSelectionStore, type ShareOrderContext } from '@/store/selectionStore';
+import { useAuthStore } from '@/store/authStore';
 import { useLongPress } from '@/hooks/useLongPress';
 import type { Product } from '@/types';
+import { productApi } from '@/api/product.api';
+import { curationApi } from '@/api/curation.api';
 
 interface ProductCardProps {
   product: Product;
@@ -18,6 +22,10 @@ interface ProductCardProps {
   showUpdatedAt?: boolean;
   /** Curated share context for checkout (order mode + trader). */
   shareOrderContext?: ShareOrderContext;
+  /** Customers: number of pinned share photos for this product (opens gallery tap). */
+  customerSharedPhotoCount?: number;
+  /** Context forwarded to shared-photo gallery checkout. Prefer over shareOrderContext for gallery navigation. */
+  galleryOrderContext?: ShareOrderContext | null;
 }
 
 export function ProductCard({
@@ -28,8 +36,12 @@ export function ProductCard({
   sharedWithLabel,
   showUpdatedAt,
   shareOrderContext,
+  customerSharedPhotoCount,
+  galleryOrderContext,
 }: ProductCardProps) {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const userRole = useAuthStore((s) => s.user?.role);
   const { isSelecting, selectedIds, enterSelectionMode, toggleItem } = useSelectionStore();
   const isSelected = selectedIds.has(product.id);
   const cardRef = useRef<HTMLDivElement>(null);
@@ -55,11 +67,50 @@ export function ProductCard({
 
   const longPress = useLongPress(onLongPress);
 
+  const prefetchGalleryProduct = useCallback(() => {
+    if (userRole === 'TRADER' && !isSelecting) {
+      void queryClient.prefetchQuery({
+        queryKey: ['product-gallery', product.id],
+        queryFn: () => productApi.getTraderGallery(product.id),
+        staleTime: 60_000,
+      });
+      return;
+    }
+    if (userRole !== 'CUSTOMER' || isSelecting) return;
+    const ctx = galleryOrderContext ?? shareOrderContext;
+    const n = customerSharedPhotoCount ?? 0;
+    if (!ctx || n < 1) return;
+    void queryClient.prefetchQuery({
+      queryKey: ['customer-shared-photos', product.id],
+      queryFn: () => curationApi.getSharedPhotosForProduct(product.id),
+      staleTime: 30_000,
+    });
+  }, [
+    product.id,
+    queryClient,
+    userRole,
+    isSelecting,
+    galleryOrderContext,
+    shareOrderContext,
+    customerSharedPhotoCount,
+  ]);
+
   const handleClick = () => {
     if (longPress.didFire()) return;
     if (isSelecting) {
       toggleItem(product.id);
     } else {
+      if (userRole === 'TRADER') {
+        navigate(`/products/${product.id}/gallery`);
+        return;
+      }
+      const ctxGallery = galleryOrderContext ?? shareOrderContext;
+      if (userRole === 'CUSTOMER' && ctxGallery && (customerSharedPhotoCount ?? 0) >= 1) {
+        navigate(`/products/${product.id}/customer-shared`, {
+          state: { shareOrderContext: ctxGallery },
+        });
+        return;
+      }
       navigate(`/products/${product.id}`, {
         state: shareOrderContext
           ? {
@@ -85,7 +136,12 @@ export function ProductCard({
       tabIndex={0}
       onClick={handleClick}
       onKeyDown={(e) => e.key === 'Enter' && handleClick()}
-      {...longPress}
+      onPointerDown={(e) => {
+        prefetchGalleryProduct();
+        longPress.onPointerDown(e);
+      }}
+      onPointerUp={longPress.onPointerUp}
+      onPointerCancel={longPress.onPointerCancel}
       className={`relative aspect-[3/4] cursor-pointer overflow-hidden rounded-xl bg-gray-100 select-none ${
         isSelected ? 'ring-3 ring-primary-500' : ''
       }`}
@@ -144,6 +200,14 @@ export function ProductCard({
             ) : (
               sharedBy
             )}
+          </p>
+        </div>
+      )}
+
+      {!isSelecting && customerSharedPhotoCount != null && customerSharedPhotoCount > 0 && userRole === 'CUSTOMER' && (
+        <div className="pointer-events-none absolute bottom-16 left-2 right-2 rounded-lg bg-black/50 px-2 py-1 backdrop-blur-sm">
+          <p className="text-[9px] font-semibold text-center text-white">
+            {customerSharedPhotoCount} shared photo{customerSharedPhotoCount > 1 ? 's' : ''} · tap to pick & order
           </p>
         </div>
       )}

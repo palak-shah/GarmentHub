@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { Minus, Plus, Trash2, AlertTriangle, Info } from 'lucide-react';
@@ -25,78 +25,171 @@ const GROUP_COLORS = [
   'bg-rose-100 text-rose-700 border-rose-300',
 ];
 
+type PackRow = {
+  lineKey: string;
+  product: Product;
+  productImageId?: string;
+  defaultQty: number;
+};
+
+function rowThumbUrl(row: PackRow): string | undefined {
+  if (row.productImageId && row.product.imageAssets?.length) {
+    const asset = row.product.imageAssets.find((a) => a.id === row.productImageId);
+    if (asset) return asset.url;
+  }
+  return row.product.images?.[0];
+}
+
 export default function BulkOrder() {
-  const { selectedIds, clearSelection, toggleItem, pendingOrderMode, pendingTraderId } = useSelectionStore();
   const navigate = useNavigate();
+  const location = useLocation();
+  const orderDraft = (
+    location.state as {
+      orderDraft?: {
+        traderId?: string;
+        orderMode?: 'DIRECT' | 'MANAGED';
+        lines: { productId: string; productImageId?: string; quantity?: number }[];
+      };
+    } | null
+  )?.orderDraft;
+
+  const { selectedIds, clearSelection, toggleItem, pendingOrderMode, pendingTraderId } = useSelectionStore();
   const queryClient = useQueryClient();
-  const ids = Array.from(selectedIds);
+  const selectionIdsList = Array.from(selectedIds);
 
   const [quantities, setQuantities] = useState<Record<string, number>>({});
+  const [draftHiddenKeys, setDraftHiddenKeys] = useState<Set<string>>(() => new Set());
   const [globalQty, setGlobalQty] = useState<string>('');
   const [globalQtyTouched, setGlobalQtyTouched] = useState(false);
   const [qtyMode, setQtyMode] = useState<QtyMode>('individual');
 
-  // Group mode state
-  const [productGroups, setProductGroups] = useState<Record<string, number>>({}); // productId -> groupIndex
-  const [groupQuantities, setGroupQuantities] = useState<Record<number, string>>({}); // groupIndex -> qty string
+  const [productGroups, setProductGroups] = useState<Record<string, number>>({});
+  const [groupQuantities, setGroupQuantities] = useState<Record<number, string>>({});
 
-  /** MANAGED in session without a trader id cannot be fulfilled — match server and place as DIRECT. */
-  const orderMode =
-    pendingOrderMode === 'MANAGED' && !pendingTraderId ? 'DIRECT' : (pendingOrderMode ?? 'DIRECT');
-  const showManagedDowngradeNote = pendingOrderMode === 'MANAGED' && !pendingTraderId;
+  const hasInbound = Boolean(orderDraft?.lines?.length) || selectionIdsList.length > 0;
 
-  const { data: products, isLoading } = useQuery({
-    queryKey: ['bulk-order-products', ids],
+  const { data: packed, isLoading } = useQuery({
+    queryKey: [
+      'bulk-order-pack',
+      orderDraft?.traderId,
+      orderDraft?.orderMode,
+      JSON.stringify(orderDraft?.lines ?? []),
+      selectionIdsList.slice().sort().join(','),
+    ],
     queryFn: async () => {
-      if (ids.length === 0) return [];
-      return Promise.all(ids.map((id) => productApi.getById(id)));
+      if (orderDraft?.lines?.length) {
+        const uids = [...new Set(orderDraft.lines.map((l) => l.productId))];
+        const plist = await Promise.all(uids.map((id) => productApi.getById(id)));
+        const pmap = new Map(plist.map((p) => [p.id, p]));
+        const rows = orderDraft.lines.map((line, idx) => {
+          const prod = pmap.get(line.productId);
+          if (!prod) throw new Error('Product not found');
+          const lineKey = `${line.productId}_${line.productImageId ?? idx}`;
+          return {
+            lineKey,
+            product: prod,
+            productImageId: line.productImageId,
+            defaultQty: line.quantity ?? prod.moq,
+          } satisfies PackRow;
+        });
+        return {
+          rows,
+          source: 'draft' as const,
+          traderId: orderDraft.traderId ?? null,
+          draftOrderMode: orderDraft.orderMode ?? ('DIRECT' as const),
+        };
+      }
+      if (!selectionIdsList.length) {
+        return {
+          rows: [] as PackRow[],
+          source: 'pick' as const,
+          traderId: pendingTraderId,
+          draftOrderMode: undefined as 'DIRECT' | 'MANAGED' | undefined,
+        };
+      }
+      const plist = await Promise.all(selectionIdsList.map((id) => productApi.getById(id)));
+      return {
+        rows: plist.map(
+          (p): PackRow => ({
+            lineKey: p.id,
+            product: p,
+            defaultQty: p.moq,
+          }),
+        ),
+        source: 'pick' as const,
+        traderId: pendingTraderId,
+        draftOrderMode: undefined as 'DIRECT' | 'MANAGED' | undefined,
+      };
     },
-    enabled: ids.length > 0,
+    enabled: hasInbound,
   });
 
   useEffect(() => {
-    if (ids.length === 0) navigate('/', { replace: true });
-  }, [ids.length, navigate]);
+    if (!hasInbound) navigate('/', { replace: true });
+  }, [hasInbound, navigate]);
+
+  const rows = packed?.rows ?? [];
+  const isDraftPack = packed?.source === 'draft';
+
+  const activeRows = useMemo(() => {
+    if (!rows.length) return [];
+    if (isDraftPack) return rows.filter((r) => !draftHiddenKeys.has(r.lineKey));
+    return rows;
+  }, [rows, isDraftPack, draftHiddenKeys]);
 
   useEffect(() => {
-    if (!products) return;
+    if (packed?.source !== 'draft' || rows.length === 0) return;
+    if (activeRows.length === 0) navigate('/', { replace: true });
+  }, [packed?.source, rows.length, activeRows.length, navigate]);
+
+  const effectiveTraderId =
+    packed?.source === 'draft' ? packed?.traderId ?? null : pendingTraderId ?? null;
+  const attemptedMode =
+    packed?.source === 'draft' ? packed?.draftOrderMode ?? 'DIRECT' : pendingOrderMode ?? 'DIRECT';
+
+  const orderMode =
+    attemptedMode === 'MANAGED' && !effectiveTraderId ? 'DIRECT' : attemptedMode;
+  const showManagedDowngradeNote =
+    attemptedMode === 'MANAGED' && !effectiveTraderId && packed?.source !== 'draft';
+
+  useEffect(() => {
+    if (!rows.length) return;
     setQuantities((prev) => {
       const next = { ...prev };
-      for (const p of products) {
-        if (!(p.id in next)) next[p.id] = p.moq;
+      for (const r of rows) {
+        if (!(r.lineKey in next)) next[r.lineKey] = r.defaultQty;
       }
       return next;
     });
-  }, [products]);
+  }, [rows]);
 
   const maxMoq = useMemo(() => {
-    if (!products || products.length === 0) return 0;
-    return Math.max(...products.map((p) => p.moq));
-  }, [products]);
+    if (activeRows.length === 0) return 0;
+    return Math.max(...activeRows.map((r) => r.product.moq));
+  }, [activeRows]);
 
-  /** One product: "same for all" / grouping are meaningless — treat as per-item only. */
   const displayQtyMode: QtyMode =
-    products && products.length === 1 ? 'individual' : qtyMode;
+    activeRows.length <= 1 ? 'individual' : qtyMode;
 
-  // Active group indices
   const activeGroups = useMemo(() => {
     const s = new Set(Object.values(productGroups));
     return Array.from(s).sort();
   }, [productGroups]);
 
-  // Apply group quantities to individual quantities
   useEffect(() => {
-    if (qtyMode !== 'group' || !products || products.length <= 1) return;
-    const next: Record<string, number> = { ...quantities };
-    for (const p of products) {
-      const gi = productGroups[p.id];
-      if (gi !== undefined && groupQuantities[gi]) {
-        const num = parseInt(groupQuantities[gi], 10);
-        if (!isNaN(num) && num > 0) next[p.id] = num;
+    if (qtyMode !== 'group' || activeRows.length <= 1) return;
+    setQuantities((prev) => {
+      const next = { ...prev };
+      for (const r of activeRows) {
+        const gi = productGroups[r.lineKey];
+        if (gi !== undefined && groupQuantities[gi]) {
+          const num = parseInt(groupQuantities[gi], 10);
+          if (!isNaN(num) && num > 0) next[r.lineKey] = num;
+        }
       }
-    }
-    setQuantities(next);
-  }, [qtyMode, groupQuantities, productGroups, products]);
+      return next;
+    });
+  }, [qtyMode, groupQuantities, productGroups, activeRows]);
 
   const globalNum = parseInt(globalQty, 10);
   const globalQtyValid = !isNaN(globalNum) && globalNum > 0;
@@ -106,29 +199,28 @@ export default function BulkOrder() {
     setGlobalQty(val);
     setGlobalQtyTouched(true);
     const num = parseInt(val, 10);
-    if (!isNaN(num) && num > 0 && products) {
-      const next: Record<string, number> = {};
-      for (const p of products) next[p.id] = num;
+    if (!isNaN(num) && num > 0 && activeRows.length) {
+      const next: Record<string, number> = { ...quantities };
+      for (const r of activeRows) next[r.lineKey] = num;
       setQuantities(next);
     }
   };
 
   const placeOrder = useMutation({
     mutationFn: () => {
-      const items = (products ?? [])
-        .filter((p) => selectedIds.has(p.id))
-        .map((p) => ({
-          productId: p.id,
-          quantity: quantities[p.id] || p.moq,
-        }));
+      const items = activeRows.map((r) => ({
+        productId: r.product.id,
+        quantity: quantities[r.lineKey] ?? r.defaultQty,
+        ...(r.productImageId ? { productImageId: r.productImageId } : {}),
+      }));
       return orderApi.create({
         items,
         orderMode,
-        ...(pendingTraderId ? { traderId: pendingTraderId } : {}),
+        ...(effectiveTraderId ? { traderId: effectiveTraderId } : {}),
       });
     },
     onSuccess: () => {
-      clearSelection();
+      if (packed?.source !== 'draft') clearSelection();
       queryClient.invalidateQueries({ queryKey: ['orders'] });
       queryClient.invalidateQueries({ queryKey: ['feed'] });
       queryClient.invalidateQueries({ queryKey: ['workflow-counts'] });
@@ -138,40 +230,39 @@ export default function BulkOrder() {
     onError: (err: unknown) => toast.error(apiErrorMessage(err, 'Failed to place order')),
   });
 
-  const adjustQty = (id: string, delta: number, moq: number) => {
+  const adjustQty = (lineKey: string, delta: number, moq: number) => {
     setGlobalQtyTouched(false);
     setGlobalQty('');
     setQuantities((prev) => {
-      const current = prev[id] ?? moq;
+      const current = prev[lineKey] ?? moq;
       const next = Math.max(moq, current + delta);
-      return { ...prev, [id]: next };
+      return { ...prev, [lineKey]: next };
     });
   };
 
-  const handleIndividualQtyChange = (id: string, val: number) => {
+  const handleIndividualQtyChange = (lineKey: string, val: number) => {
     setGlobalQtyTouched(false);
     setGlobalQty('');
-    setQuantities((prev) => ({ ...prev, [id]: val }));
+    setQuantities((prev) => ({ ...prev, [lineKey]: val }));
   };
 
-  const getQty = (id: string, moq: number) => quantities[id] ?? moq;
-  const isBelowMoq = (p: Product) => getQty(p.id, p.moq) < p.moq;
-  const hasAnyError = products?.some((p) => isBelowMoq(p)) ?? false;
-  const inactiveProducts = useMemo(
-    () => (products ?? []).filter((p) => p.status !== 'ACTIVE'),
-    [products],
-  );
+  const getQty = (lineKey: string, moq: number) => quantities[lineKey] ?? moq;
+  const isBelowMoq = (row: PackRow) => getQty(row.lineKey, row.product.moq) < row.product.moq;
+
+  const hasAnyError = activeRows.some(isBelowMoq);
+  const inactiveProducts = activeRows.filter((r) => r.product.status !== 'ACTIVE').map((r) => r.product);
   const hasInactive = inactiveProducts.length > 0;
-  const canSubmit = products && products.length > 0 && !hasAnyError && !hasInactive;
+  const canSubmit = activeRows.length > 0 && !hasAnyError && !hasInactive;
+
+  const lineCount = activeRows.length;
 
   if (isLoading) return <PageSpinner />;
 
   return (
     <>
-      <Header title={`Order (${ids.length})`} showBack />
+      <Header title={`Order (${lineCount})`} showBack />
 
       <div className="mx-auto max-w-4xl px-4 py-4 pb-32">
-        {/* Order mode — read-only, set by trader */}
         <div className="mb-4 flex items-start gap-2.5 rounded-xl bg-gray-50 px-4 py-3">
           <Info className="h-4 w-4 text-gray-400 shrink-0 mt-0.5" />
           <div>
@@ -206,8 +297,7 @@ export default function BulkOrder() {
           </div>
         )}
 
-        {/* Quantity mode tabs */}
-        {products && products.length > 1 && (
+        {activeRows.length > 1 && (
           <div className="mb-3 flex rounded-xl bg-gray-100/90 p-1 ring-1 ring-gray-200/80">
             {(['individual', 'same', 'group'] as QtyMode[]).map((m) => (
               <button
@@ -225,14 +315,14 @@ export default function BulkOrder() {
           </div>
         )}
 
-        {/* Same qty for all (only when ordering multiple products) */}
         {displayQtyMode === 'same' && (
           <>
             <div className={`mb-2 rounded-lg border p-3 ${
               globalQtyTouched && globalQtyBelowMax
                 ? 'border-red-300 bg-red-50'
                 : 'border-gray-200 bg-white'
-            }`}>
+            }`}
+            >
               <div className="flex items-center gap-2">
                 <span className="text-sm font-medium text-gray-600 whitespace-nowrap">Same qty for all</span>
                 <input
@@ -252,12 +342,13 @@ export default function BulkOrder() {
                 <div className="mt-2 flex items-start gap-1.5">
                   <AlertTriangle className="h-4 w-4 text-red-500 shrink-0 mt-0.5" />
                   <p className="text-xs font-semibold text-red-600">
-                    Minimum quantity must be at least {maxMoq} pcs (highest MOQ among selected products). Please increase to {maxMoq} or more.
+                    Minimum quantity must be at least {maxMoq} pcs (highest MOQ among selected products).
+                    Please increase to {maxMoq} or more.
                   </p>
                 </div>
               )}
             </div>
-            {products && products.length > 1 && !globalQtyTouched && (
+            {activeRows.length > 1 && !globalQtyTouched && (
               <p className="mb-4 text-xs text-gray-400">
                 Highest MOQ is {maxMoq} pcs — enter at least {maxMoq} to apply same quantity to all.
               </p>
@@ -265,16 +356,14 @@ export default function BulkOrder() {
           </>
         )}
 
-        {/* Group qty mode */}
-        {displayQtyMode === 'group' && products && (
+        {displayQtyMode === 'group' && activeRows.length > 0 && (
           <div className="mb-4 space-y-3">
-            <p className="text-xs text-gray-500">Assign each product to a group, then set quantity per group.</p>
+            <p className="text-xs text-gray-500">Assign each line to a group, then set quantity per group.</p>
 
-            {/* Group qty inputs */}
             <div className="flex flex-wrap gap-2">
               {activeGroups.map((gi) => {
                 const groupMoq = Math.max(
-                  ...(products.filter((p) => productGroups[p.id] === gi).map((p) => p.moq)),
+                  ...activeRows.filter((r) => productGroups[r.lineKey] === gi).map((r) => r.product.moq),
                   1,
                 );
                 return (
@@ -292,29 +381,29 @@ export default function BulkOrder() {
                 );
               })}
               {activeGroups.length === 0 && (
-                <p className="text-xs text-gray-400 italic">Tap group labels below to assign products</p>
+                <p className="text-xs text-gray-400 italic">Tap group labels below to assign items</p>
               )}
             </div>
           </div>
         )}
 
         <div className="space-y-3 mt-4">
-          {(products ?? []).map((p) => {
-            const qty = getQty(p.id, p.moq);
+          {activeRows.map((r) => {
+            const p = r.product;
+            const qty = getQty(r.lineKey, p.moq);
             const step = p.moq >= 50 ? 50 : p.moq >= 10 ? 10 : 1;
             const error = qty < p.moq;
+            const thumb = rowThumbUrl(r);
             return (
               <div
-                key={p.id}
+                key={r.lineKey}
                 className={`flex items-center gap-3 rounded-2xl p-3 ${
-                  error
-                    ? 'bg-red-50 border-2 border-red-200'
-                    : 'bg-white shadow-sm'
+                  error ? 'bg-red-50 border-2 border-red-200' : 'bg-white shadow-sm'
                 }`}
               >
                 <div className="h-16 w-16 shrink-0 overflow-hidden rounded-xl bg-gray-100">
-                  {p.images?.[0] ? (
-                    <img src={mediaUrl(p.images[0])} alt="" className="h-full w-full object-cover" loading="lazy" />
+                  {thumb ? (
+                    <img src={mediaUrl(thumb)} alt="" className="h-full w-full object-cover" loading="lazy" />
                   ) : (
                     <div className="flex h-full items-center justify-center text-gray-300 text-xs">—</div>
                   )}
@@ -327,23 +416,24 @@ export default function BulkOrder() {
                     {error && ` — need ${p.moq - qty} more`}
                   </p>
 
-                  {/* Group assignment chips */}
-                  {qtyMode === 'group' && (
+                  {qtyMode === 'group' && activeRows.length > 1 && (
                     <div className="mt-1.5 flex flex-wrap gap-1">
-                      {GROUP_LABELS.slice(0, Math.max(2, activeGroups.length + 1)).map((lbl, gi) => (
+                      {GROUP_LABELS.slice(0, Math.max(2, activeGroups.length + 1)).map((_lbl, gi) => (
                         <button
                           key={gi}
-                          onClick={() => setProductGroups((prev) => ({
-                            ...prev,
-                            [p.id]: prev[p.id] === gi ? -1 : gi,
-                          }))}
+                          onClick={() =>
+                            setProductGroups((prev) => ({
+                              ...prev,
+                              [r.lineKey]: prev[r.lineKey] === gi ? -1 : gi,
+                            }))
+                          }
                           className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold border ${
-                            productGroups[p.id] === gi
+                            productGroups[r.lineKey] === gi
                               ? GROUP_COLORS[gi % GROUP_COLORS.length]
                               : 'bg-gray-50 text-gray-400 border-gray-200'
                           }`}
                         >
-                          {lbl}
+                          {_lbl}
                         </button>
                       ))}
                     </div>
@@ -356,7 +446,7 @@ export default function BulkOrder() {
                   {displayQtyMode === 'individual' && (
                     <div className="mt-2 flex items-center gap-0">
                       <button
-                        onClick={() => adjustQty(p.id, -step, p.moq)}
+                        onClick={() => adjustQty(r.lineKey, -step, p.moq)}
                         disabled={qty <= p.moq}
                         className="flex h-10 w-10 items-center justify-center rounded-l-xl border border-gray-200 bg-gray-50 text-gray-600 active:bg-gray-100 disabled:opacity-30"
                       >
@@ -368,7 +458,7 @@ export default function BulkOrder() {
                         value={qty}
                         onChange={(e) => {
                           const val = parseInt(e.target.value, 10);
-                          if (!isNaN(val)) handleIndividualQtyChange(p.id, val);
+                          if (!isNaN(val)) handleIndividualQtyChange(r.lineKey, val);
                         }}
                         className={`h-10 w-16 border-y text-center text-base font-bold focus:outline-none ${
                           error
@@ -377,7 +467,7 @@ export default function BulkOrder() {
                         }`}
                       />
                       <button
-                        onClick={() => adjustQty(p.id, step, p.moq)}
+                        onClick={() => adjustQty(r.lineKey, step, p.moq)}
                         className="flex h-10 w-10 items-center justify-center rounded-r-xl border border-gray-200 bg-gray-50 text-gray-600 active:bg-gray-100"
                       >
                         <Plus className="h-4 w-4" />
@@ -387,8 +477,13 @@ export default function BulkOrder() {
                 </div>
 
                 <button
-                  onClick={() => toggleItem(p.id)}
+                  onClick={() => {
+                    if (isDraftPack)
+                      setDraftHiddenKeys((prev) => new Set(prev).add(r.lineKey));
+                    else toggleItem(p.id);
+                  }}
                   className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-gray-400 active:bg-red-50 active:text-red-500"
+                  aria-label="Remove line"
                 >
                   <Trash2 className="h-5 w-5" />
                 </button>
@@ -398,7 +493,6 @@ export default function BulkOrder() {
         </div>
       </div>
 
-      {/* Submit */}
       <div className="fixed bottom-0 inset-x-0 z-30 bg-white px-4 pt-3 pb-[max(14px,env(safe-area-inset-bottom,0px))] shadow-[0_-2px_10px_rgba(0,0,0,0.06)]">
         <div className="mx-auto max-w-4xl">
           {hasInactive && (

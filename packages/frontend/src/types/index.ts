@@ -49,6 +49,26 @@ export interface Brand {
   _count?: { products: number };
 }
 
+export interface ProductImageAsset {
+  id: string;
+  url: string;
+  createdAt: string;
+}
+
+/** Trader navigates to share with photo-level selection (from product gallery). */
+export interface TraderGalleryShareLine {
+  productId: string;
+  productImageId: string;
+}
+
+/** API: `GET /products/:id/gallery` — title + vendor + dated photos only (no full enrichment). */
+export interface TraderGalleryProduct {
+  id: string;
+  name: string;
+  vendor: { id: string; name: string; businessName?: string | null };
+  imageAssets: ProductImageAsset[];
+}
+
 export interface Product {
   id: string;
   vendorId: string;
@@ -56,6 +76,8 @@ export interface Product {
   brand: Brand;
   name: string;
   images: string[];
+  /** Timestamped photos (newest first from API). Same files as `images` plus upload time. */
+  imageAssets?: ProductImageAsset[];
   categoryId: string;
   category: Category;
   pattern: string;
@@ -80,6 +102,8 @@ export interface OrderItem {
   id: string;
   orderId: string;
   productId: string;
+  /** When set, this line refers to a catalog photo the buyer picked. */
+  productImageId?: string | null;
   vendorId: string;
   requestedQty: number;
   acceptedQty?: number;
@@ -125,6 +149,12 @@ export interface Order {
   trader?: { id: string; name: string; businessName?: string } | null;
 }
 
+export interface CuratedShareLine {
+  productImageId: string | null;
+  traderOfferUnitPrice?: number | null;
+  product: Product;
+}
+
 export interface CuratedShare {
   id: string;
   trader: { id: string; name: string; businessName?: string };
@@ -132,8 +162,10 @@ export interface CuratedShare {
   orderMode: OrderMode;
   createdAt: string;
   isRead: boolean;
-  /** Products may include `traderOfferUnitPrice` from the share line. */
+  /** Flat list (deduped by product) for quick cards. */
   products: Product[];
+  /** Exact share lines with optional photo ids. */
+  lines?: CuratedShareLine[];
 }
 
 export interface Notification {

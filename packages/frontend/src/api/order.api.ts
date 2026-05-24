@@ -2,7 +2,7 @@ import api from './client';
 import type { ApiResponse, Order, OrderItem } from '@/types';
 
 export interface CreateOrderPayload {
-  items: { productId: string; quantity: number }[];
+  items: { productId: string; quantity: number; productImageId?: string }[];
   traderId?: string;
   orderMode?: 'DIRECT' | 'MANAGED';
   note?: string;

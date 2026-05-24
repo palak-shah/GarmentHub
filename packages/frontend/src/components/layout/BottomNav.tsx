@@ -10,7 +10,7 @@ import { orderApi } from '@/api/order.api';
 import { vendorApi } from '@/api/vendor.api';
 import type { Role } from '@/types';
 
-const HIDDEN_ON_ROUTES = ['/products/', '/bulk-order', '/trader/share'];
+const HIDDEN_ON_ROUTES = ['/products/', '/bulk-order', '/trader/share', '/trader/groups'];
 
 interface NavItem {
   to: string;
@@ -23,7 +23,7 @@ function getNavItems(role: Role): NavItem[] {
     return [
       { to: '/vendor', label: 'Home', icon: <LayoutDashboard className="h-5 w-5" /> },
       { to: '/vendor/products', label: 'Products', icon: <Package className="h-5 w-5" /> },
-      { to: '/network', label: 'People', icon: <Users className="h-5 w-5" /> },
+      { to: '/network', label: 'Connect', icon: <Users className="h-5 w-5" /> },
       { to: '/vendor/orders', label: 'Orders', icon: <ClipboardList className="h-5 w-5" /> },
       { to: '/profile', label: 'Profile', icon: <User className="h-5 w-5" /> },
     ];

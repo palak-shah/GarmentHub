@@ -10,6 +10,7 @@ import { useAuthStore } from '@/store/authStore';
 import { useSelectionStore, type ShareOrderContext } from '@/store/selectionStore';
 import { useMarkSeen } from '@/hooks/useMarkSeen';
 import { useScrollRestore } from '@/hooks/useScrollRestore';
+import { apiErrorMessage } from '@/utils/apiError';
 import { ProductCard } from '@/components/product/ProductCard';
 import { SelectionActionBar } from '@/components/product/SelectionActionBar';
 import { mediaUrl } from '@/utils/mediaUrl';
@@ -35,6 +36,109 @@ function formatShareSectionDateLabel(dateKey: string): string {
     month: 'short',
     year: 'numeric',
   });
+}
+
+/** Older payloads may omit lines; derive them from flattened products. */
+function normalizeReceivedShare(share: CuratedShare): CuratedShare {
+  if (share.lines?.length) return share;
+  return {
+    ...share,
+    lines: share.products.map((p) => ({
+      productImageId: null,
+      traderOfferUnitPrice: p.traderOfferUnitPrice,
+      product: p,
+    })),
+  };
+}
+
+type CustomerTraderRow = {
+  product: Product;
+  photoCount: number;
+  galleryContext: ShareOrderContext | null;
+};
+
+type CustomerTraderBucket = {
+  traderId: string;
+  trader: CuratedShare['trader'];
+  rows: CustomerTraderRow[];
+};
+
+type CustomerDateBucket = {
+  dateKey: string;
+  traders: CustomerTraderBucket[];
+};
+
+function buildCustomerDateBuckets(normalizedShares: CuratedShare[]): CustomerDateBucket[] {
+  const byDay = new Map<string, CuratedShare[]>();
+  const sortedShares = [...normalizedShares].sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+  );
+  for (const s of sortedShares) {
+    const dk = new Date(s.createdAt).toISOString().slice(0, 10);
+    if (!byDay.has(dk)) byDay.set(dk, []);
+    byDay.get(dk)!.push(s);
+  }
+  const dayKeys = [...byDay.keys()].sort((a, b) => (a < b ? 1 : -1));
+
+  const out: CustomerDateBucket[] = [];
+  for (const dk of dayKeys) {
+    const bucketShares = byDay.get(dk)!;
+    const byTrader = new Map<string, CuratedShare[]>();
+    for (const s of bucketShares) {
+      const tid = s.trader.id;
+      if (!byTrader.has(tid)) byTrader.set(tid, []);
+      byTrader.get(tid)!.push(s);
+    }
+    const traders: CustomerTraderBucket[] = [];
+    for (const [, tShares] of byTrader.entries()) {
+      const perProduct = new Map<
+        string,
+        { product: Product; photoCount: number; galleryContext: ShareOrderContext | null }
+      >();
+
+      const orderedOldestFirst = [...tShares].sort(
+        (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+      );
+
+      for (const share of orderedOldestFirst) {
+        const lines = normalizeReceivedShare(share).lines ?? [];
+        for (const line of lines) {
+          const pid = line.product.id;
+          const ctx: ShareOrderContext = { traderId: share.trader.id, orderMode: share.orderMode };
+          const cur = perProduct.get(pid);
+          if (!cur) {
+            perProduct.set(pid, {
+              product: line.product,
+              photoCount: 1,
+              galleryContext: ctx,
+            });
+          } else {
+            cur.photoCount += 1;
+            cur.product = line.product;
+            cur.galleryContext = ctx;
+          }
+        }
+      }
+
+      traders.push({
+        traderId: tShares[0].trader.id,
+        trader: tShares[0].trader,
+        rows: [...perProduct.values()].map(({ product, photoCount, galleryContext }) => ({
+          product,
+          photoCount,
+          galleryContext,
+        })),
+      });
+    }
+    traders.sort((a, b) => {
+      const an = (a.trader.businessName || a.trader.name || '').toLocaleLowerCase();
+      const bn = (b.trader.businessName || b.trader.name || '').toLocaleLowerCase();
+      return an.localeCompare(bn);
+    });
+
+    out.push({ dateKey: dk, traders });
+  }
+  return out;
 }
 
 function SkeletonGrid() {
@@ -134,14 +238,26 @@ export default function CustomerHome() {
     enabled: isTrader && traderTab !== 'NEW',
   });
 
-  const { data: unseenProducts, isLoading: unseenLoading } = useQuery({
+  const {
+    data: unseenProducts,
+    isPending: unseenPending,
+    isError: unseenError,
+    error: unseenQueryError,
+    refetch: refetchUnseen,
+  } = useQuery({
     queryKey: ['workflow-unseen'],
     queryFn: () => workflowApi.unseen(40),
     enabled: isTrader && traderTab === 'NEW',
     refetchOnWindowFocus: false,
   });
 
-  const { data: unseenGrouped } = useQuery({
+  const {
+    data: unseenGrouped,
+    isPending: unseenGroupedPending,
+    isError: unseenGroupedError,
+    error: unseenGroupedQueryError,
+    refetch: refetchUnseenGrouped,
+  } = useQuery({
     queryKey: ['workflow-unseen-grouped'],
     queryFn: () => workflowApi.unseenGrouped(40),
     enabled: isTrader && traderTab === 'NEW',
@@ -264,10 +380,33 @@ export default function CustomerHome() {
 
   // ── Derived data ──
 
-  const allShares = curatedShares ?? [];
+  const allSharesNormalized = useMemo(
+    () => (curatedShares ?? []).map(normalizeReceivedShare),
+    [curatedShares],
+  );
+
+  const customerDateBuckets = useMemo(
+    () => (role === 'CUSTOMER' ? buildCustomerDateBuckets(allSharesNormalized) : []),
+    [role, allSharesNormalized],
+  );
+
+  const customerSharedExtras = useMemo(() => {
+    const m = new Map<string, { photoCount: number; ctx: ShareOrderContext | null }>();
+    for (const day of customerDateBuckets) {
+      for (const tb of day.traders) {
+        for (const row of tb.rows) {
+          m.set(row.product.id, {
+            photoCount: row.photoCount,
+            ctx: row.galleryContext,
+          });
+        }
+      }
+    }
+    return m;
+  }, [customerDateBuckets]);
 
   // Group curated shares by trader for stories
-  const sharesByTrader = allShares.reduce<Record<string, { trader: CuratedShare['trader']; shares: CuratedShare[]; products: Product[] }>>((acc, share) => {
+  const sharesByTrader = allSharesNormalized.reduce<Record<string, { trader: CuratedShare['trader']; shares: CuratedShare[]; products: Product[] }>>((acc, share) => {
     const tid = share.trader.id;
     if (!acc[tid]) acc[tid] = { trader: share.trader, shares: [], products: [] };
     acc[tid].shares.push(share);
@@ -279,7 +418,9 @@ export default function CustomerHome() {
     const seen = new Set<string>();
     g.products = [];
     for (const s of g.shares) {
-      for (const p of s.products) {
+      const lines = normalizeReceivedShare(s).lines ?? [];
+      for (const line of lines) {
+        const p = line.product;
         if (!seen.has(p.id)) {
           seen.add(p.id);
           g.products.push(p);
@@ -297,19 +438,21 @@ export default function CustomerHome() {
   /** Latest share wins per product (for order mode + trader at checkout). */
   const shareOrderContextByProductId = useMemo(() => {
     const map = new Map<string, ShareOrderContext>();
-    if (role !== 'CUSTOMER' || allShares.length === 0) return map;
-    const sorted = [...allShares].sort(
+    if (role !== 'CUSTOMER' || allSharesNormalized.length === 0) return map;
+    const sorted = [...allSharesNormalized].sort(
       (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
     );
     for (const share of sorted) {
       const tid = share.trader.id;
       const mode = share.orderMode;
-      for (const p of share.products) {
+      const lines = normalizeReceivedShare(share).lines ?? [];
+      for (const line of lines) {
+        const p = line.product;
         if (!map.has(p.id)) map.set(p.id, { traderId: tid, orderMode: mode });
       }
     }
     return map;
-  }, [role, allShares]);
+  }, [role, allSharesNormalized]);
 
   // Customer feed products from network
   const feedProducts = feedData?.pages.flatMap((p) => [...p.newProducts, ...p.pendingProducts, ...p.doneProducts]) ?? [];
@@ -375,7 +518,7 @@ export default function CustomerHome() {
 
   const loadingProducts = isTrader
     ? traderTab === 'NEW'
-      ? unseenLoading
+      ? unseenPending || unseenGroupedPending
       : traderTab === 'SHARED'
         ? workflowLoading || sentSharesPending
         : workflowLoading
@@ -395,6 +538,13 @@ export default function CustomerHome() {
     queryClient.invalidateQueries({ queryKey: ['trader-alerts'] });
   };
 
+  // Discover (non-curated strip) with same category filter as main feed
+  const networkDiscoverProducts = useMemo(() => {
+    let rest = feedProducts.filter((p) => !curatedProductIds.has(p.id));
+    if (feedCategoryId) rest = rest.filter((p) => p.categoryId === feedCategoryId);
+    return rest;
+  }, [feedProducts, curatedProductIds, feedCategoryId]);
+
   // ── Render helpers ──
 
   const renderGrid = (
@@ -403,22 +553,36 @@ export default function CustomerHome() {
     showUpdatedAt?: boolean,
     sharedWithMap?: Map<string, string>,
     shareCtxByProductId?: Map<string, ShareOrderContext>,
+    customerExtras?: Map<string, { photoCount: number; ctx: ShareOrderContext | null }>,
   ) => (
     <div className="grid grid-cols-2 gap-2 px-4">
-      {products.map((product) => (
-        <ProductCard
-          key={product.id}
-          product={product}
-          onVisible={onVisible}
-          onHidden={onHidden}
-          sharedBy={traderMap?.get(product.id)}
-          showUpdatedAt={showUpdatedAt}
-          sharedWithLabel={sharedWithMap?.get(product.id)}
-          shareOrderContext={shareCtxByProductId?.get(product.id)}
-        />
-      ))}
+      {products.map((product) => {
+        const ex = customerExtras?.get(product.id);
+        return (
+          <ProductCard
+            key={product.id}
+            product={product}
+            onVisible={onVisible}
+            onHidden={onHidden}
+            sharedBy={traderMap?.get(product.id)}
+            showUpdatedAt={showUpdatedAt}
+            sharedWithLabel={sharedWithMap?.get(product.id)}
+            shareOrderContext={shareCtxByProductId?.get(product.id)}
+            customerSharedPhotoCount={ex?.photoCount}
+            galleryOrderContext={ex?.ctx ?? undefined}
+          />
+        );
+      })}
     </div>
   );
+
+  const sectionedCustomerLayout =
+    !isTrader &&
+    !q &&
+    !activeStory &&
+    !feedLoading &&
+    customerDateBuckets.length > 0 &&
+    !isSelecting;
 
   return (
     <>
@@ -520,7 +684,26 @@ export default function CustomerHome() {
               </div>
             )}
 
-            {loadingProducts ? <SkeletonGrid /> : allVisibleProducts.length === 0 ? (
+            {loadingProducts ? (
+              <SkeletonGrid />
+            ) : traderTab === 'NEW' && (unseenError || unseenGroupedError) ? (
+              <div className="mx-auto max-w-4xl px-4 py-16 text-center">
+                <p className="text-base font-medium text-gray-900">Couldn’t load products</p>
+                <p className="mt-2 text-sm text-gray-500">
+                  {apiErrorMessage(unseenQueryError ?? unseenGroupedQueryError, 'Network or server error')}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void refetchUnseen();
+                    void refetchUnseenGrouped();
+                  }}
+                  className="mt-4 rounded-full bg-primary-600 px-5 py-2 text-sm font-semibold text-white active:bg-primary-700"
+                >
+                  Retry
+                </button>
+              </div>
+            ) : allVisibleProducts.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-20 text-gray-400">
                 {q ? (
                   <p className="text-base font-medium">No matches for "{selectFilter}"</p>
@@ -678,6 +861,77 @@ export default function CustomerHome() {
                   </>
                 )}
               </div>
+            ) : sectionedCustomerLayout ? (
+              <>
+                {customerDateBuckets.map((day) => (
+                  <div key={day.dateKey} className="space-y-3 pb-4">
+                    <div className="px-4 pt-3">
+                      <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">
+                        {formatShareSectionDateLabel(day.dateKey)}
+                      </p>
+                      <p className="text-[10px] text-gray-400">Shared with you</p>
+                    </div>
+                    {day.traders.map((tb) => {
+                      const rows = tb.rows.filter(
+                        (row) => !feedCategoryId || row.product.categoryId === feedCategoryId,
+                      );
+                      if (rows.length === 0) return null;
+                      const tname = tb.trader.businessName || tb.trader.name || '?';
+                      return (
+                        <div key={`${day.dateKey}_${tb.traderId}`} className="space-y-2">
+                          <div className="flex items-center gap-2 px-4 pt-2">
+                            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary-100 text-xs font-bold text-primary-700">
+                              {tname[0].toUpperCase()}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate text-sm font-semibold text-gray-900">{tname}</p>
+                              <p className="text-[10px] text-gray-400">Trader</p>
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2 px-4">
+                            {rows.map((row) => {
+                              return (
+                                <ProductCard
+                                  key={`${day.dateKey}_${tb.traderId}_${row.product.id}`}
+                                  product={row.product}
+                                  onVisible={onVisible}
+                                  onHidden={onHidden}
+                                  sharedBy={tb.trader.businessName || tb.trader.name || undefined}
+                                  shareOrderContext={shareOrderContextByProductId.get(row.product.id)}
+                                  customerSharedPhotoCount={row.photoCount}
+                                  galleryOrderContext={row.galleryContext ?? undefined}
+                                />
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ))}
+                {networkDiscoverProducts.length > 0 ? (
+                  <div className="border-t border-gray-100 pb-8">
+                    <div className="px-4 pt-5 pb-2">
+                      <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">Discover</p>
+                      <p className="text-[10px] text-gray-400">Everything else from your feed</p>
+                    </div>
+                    {renderGrid(
+                      networkDiscoverProducts,
+                      undefined,
+                      false,
+                      undefined,
+                      shareOrderContextByProductId,
+                      customerSharedExtras,
+                    )}
+                  </div>
+                ) : null}
+                <div ref={sentinelRef} className="h-4" />
+                {isFetchingNextPage && (
+                  <div className="flex justify-center py-4">
+                    <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary-600 border-t-transparent" />
+                  </div>
+                )}
+              </>
             ) : (
               <>
                 {renderGrid(
@@ -686,6 +940,7 @@ export default function CustomerHome() {
                   false,
                   undefined,
                   shareOrderContextByProductId,
+                  customerSharedExtras,
                 )}
                 <div ref={sentinelRef} className="h-4" />
                 {isFetchingNextPage && (

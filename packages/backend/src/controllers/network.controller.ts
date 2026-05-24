@@ -31,6 +31,13 @@ export class NetworkController {
     } catch (err) { next(err); }
   }
 
+  static async vendorConnectTrader(req: Request, res: Response, next: NextFunction) {
+    try {
+      await NetworkService.vendorConnectTrader(req.user!.id, req.params.traderId);
+      success(res, null, 'Connected');
+    } catch (err) { next(err); }
+  }
+
   static async unfollow(req: Request, res: Response, next: NextFunction) {
     try {
       await NetworkService.unfollow(req.user!.id, req.params.userId);
@@ -57,6 +64,13 @@ export class NetworkController {
     try {
       const data = await NetworkService.connectViaInvite(req.body.code, req.user!.id);
       success(res, data, 'Connected');
+    } catch (err) { next(err); }
+  }
+
+  static async traderInsights(req: Request, res: Response, next: NextFunction) {
+    try {
+      const data = await NetworkService.getTraderInsightsForVendor(req.user!.id, req.params.traderId);
+      success(res, data);
     } catch (err) { next(err); }
   }
 }

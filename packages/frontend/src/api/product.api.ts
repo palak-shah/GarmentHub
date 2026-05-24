@@ -1,5 +1,5 @@
 import api from './client';
-import type { ApiResponse, Product, PaginatedResponse, FilterOptions, Category, FeedResponse } from '@/types';
+import type { ApiResponse, Product, PaginatedResponse, FilterOptions, Category, FeedResponse, TraderGalleryProduct } from '@/types';
 
 export interface ProductQuery {
   search?: string;
@@ -22,6 +22,9 @@ export const productApi = {
   getById: (id: string) =>
     api.get<ApiResponse<Product>>(`/products/${id}`).then((r) => r.data.data),
 
+  /** Trader photo grid only — smaller/faster than `getById`. */
+  getTraderGallery: (id: string) =>
+    api.get<ApiResponse<TraderGalleryProduct>>(`/products/${id}/gallery`).then((r) => r.data.data),
   getMyProducts: () =>
     api.get<ApiResponse<Product[]>>('/products/my').then((r) => r.data.data),
 

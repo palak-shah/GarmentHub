@@ -64,6 +64,9 @@ function CompactUserCard({
   loading,
   highlight,
   showPhone,
+  inboundOnly = false,
+  onOpenDetail,
+  onConnect,
 }: {
   user: ConnectionUser;
   isFollowing: boolean;
@@ -71,6 +74,12 @@ function CompactUserCard({
   loading: boolean;
   highlight?: string;
   showPhone?: boolean;
+  /** Vendor: connected traders (they follow you for updates) — never show Follow; Disconnect when connected. */
+  inboundOnly?: boolean;
+  /** Tap row to open detail (e.g. vendor trader insights); action buttons call stopPropagation. */
+  onOpenDetail?: () => void;
+  /** Vendor + not connected: in-app connect (trader already on GarmentHub). */
+  onConnect?: () => void;
 }) {
   const displayName = user.businessName || user.name;
 
@@ -88,7 +97,22 @@ function CompactUserCard({
   };
 
   return (
-    <div className="flex items-center gap-3 py-3">
+    <div
+      className={`flex items-center gap-3 py-3${onOpenDetail ? ' cursor-pointer rounded-xl active:bg-gray-50/80' : ''}`}
+      onClick={onOpenDetail}
+      role={onOpenDetail ? 'button' : undefined}
+      onKeyDown={
+        onOpenDetail
+          ? (e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onOpenDetail();
+              }
+            }
+          : undefined
+      }
+      tabIndex={onOpenDetail ? 0 : undefined}
+    >
       <Avatar name={displayName} size="md" />
       <div className="flex-1 min-w-0">
         <p className="truncate text-sm font-semibold text-gray-900">{highlightText(displayName, highlight)}</p>
@@ -105,17 +129,51 @@ function CompactUserCard({
           )}
         </div>
       </div>
-      <button
-        onClick={(e) => { e.stopPropagation(); onToggle(); }}
-        disabled={loading}
-        className={`shrink-0 rounded-full px-4 py-2 text-xs font-bold transition-all ${
-          isFollowing
-            ? 'bg-gray-100 text-gray-500 active:bg-gray-200'
-            : 'bg-primary-600 text-white active:bg-primary-700'
-        } disabled:opacity-50`}
-      >
-        {isFollowing ? 'Following' : 'Follow'}
-      </button>
+      <div className="shrink-0" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+        {inboundOnly ? (
+          isFollowing ? (
+            <button
+              type="button"
+              onClick={() => onToggle()}
+              disabled={loading}
+              className="rounded-full px-4 py-2 text-xs font-bold bg-gray-100 text-gray-500 active:bg-gray-200 disabled:opacity-50"
+            >
+              Disconnect
+            </button>
+          ) : onConnect ? (
+            <div className="flex max-w-[9.5rem] flex-col items-end gap-1">
+              <button
+                type="button"
+                onClick={() => onConnect()}
+                disabled={loading}
+                className="rounded-full px-4 py-2 text-xs font-bold bg-primary-600 text-white active:bg-primary-700 disabled:opacity-50"
+              >
+                Connect
+              </button>
+              <span className="text-right text-[10px] text-gray-400 leading-tight">
+                Already on GarmentHub — adds them to your traders
+              </span>
+            </div>
+          ) : (
+            <span className="block max-w-[8.5rem] text-right text-xs text-gray-400 leading-tight">
+              Not connected — they follow you for updates
+            </span>
+          )
+        ) : (
+          <button
+            type="button"
+            onClick={() => onToggle()}
+            disabled={loading}
+            className={`rounded-full px-4 py-2 text-xs font-bold transition-all ${
+              isFollowing
+                ? 'bg-gray-100 text-gray-500 active:bg-gray-200'
+                : 'bg-primary-600 text-white active:bg-primary-700'
+            } disabled:opacity-50`}
+          >
+            {isFollowing ? 'Following' : 'Follow'}
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -166,6 +224,34 @@ export default function NetworkPage() {
     enabled: canInvite,
   });
 
+  const shareInviteLink = async () => {
+    let code = inviteCode?.code;
+    if (!code) {
+      try {
+        const data = await queryClient.fetchQuery({
+          queryKey: ['invite-code'],
+          queryFn: () => networkApi.getInviteCode(),
+        });
+        code = data.code;
+      } catch {
+        toast.error('Could not load invite link');
+        return;
+      }
+    }
+    if (!code) {
+      toast.error('Could not load invite link');
+      return;
+    }
+    const url = `${window.location.origin}/login?invite=${code}`;
+    const text = `Join me on GarmentHub! ${url}`;
+    if (navigator.share) {
+      navigator.share({ title: 'GarmentHub Invite', text, url }).catch(() => {});
+    } else {
+      await navigator.clipboard.writeText(text);
+      toast.success('Invite link copied!');
+    }
+  };
+
   const { data: stories } = useQuery({
     queryKey: ['network-stories'],
     queryFn: () => networkApi.getStories(),
@@ -212,6 +298,13 @@ export default function NetworkPage() {
       queryClient.invalidateQueries({ queryKey: ['network-connections'] });
       queryClient.invalidateQueries({ queryKey: ['network-suggestions'] });
     },
+    onError: (err: unknown) => {
+      const data =
+        err && typeof err === 'object' && 'response' in err
+          ? (err as { response?: { data?: { error?: string; message?: string } } }).response?.data
+          : undefined;
+      toast.error(data?.error ?? data?.message ?? 'Could not follow');
+    },
   });
 
   const unfollowMutation = useMutation({
@@ -219,6 +312,22 @@ export default function NetworkPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['network-connections'] });
       queryClient.invalidateQueries({ queryKey: ['network-suggestions'] });
+    },
+  });
+
+  const vendorConnectMutation = useMutation({
+    mutationFn: (traderId: string) => networkApi.connectTrader(traderId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['network-connections'] });
+      queryClient.invalidateQueries({ queryKey: ['network-suggestions'] });
+      toast.success('Connected');
+    },
+    onError: (err: unknown) => {
+      const data =
+        err && typeof err === 'object' && 'response' in err
+          ? (err as { response?: { data?: { error?: string; message?: string } } }).response?.data
+          : undefined;
+      toast.error(data?.error ?? data?.message ?? 'Could not connect');
     },
   });
 
@@ -243,15 +352,7 @@ export default function NetworkPage() {
   );
 
   const handleShareInvite = () => {
-    if (!inviteCode?.code) return;
-    const url = `${window.location.origin}/login?invite=${inviteCode.code}`;
-    const text = `Join me on GarmentHub! ${url}`;
-    if (navigator.share) {
-      navigator.share({ title: 'GarmentHub Invite', text, url }).catch(() => {});
-    } else {
-      navigator.clipboard.writeText(text);
-      toast.success('Invite link copied!');
-    }
+    void shareInviteLink();
   };
 
   const navigateToTrader = (trader: ConnectionUser) => {
@@ -269,7 +370,7 @@ export default function NetworkPage() {
       {/* ── Header ── */}
       <div className="sticky top-0 z-30 bg-white border-b border-gray-100">
         <div className="mx-auto max-w-4xl flex items-center gap-2 px-4 py-2.5">
-          <h1 className="text-lg font-bold text-gray-900 shrink-0">People</h1>
+          <h1 className="text-lg font-bold text-gray-900 shrink-0">{isVendor ? 'Connect' : 'People'}</h1>
 
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
@@ -278,7 +379,7 @@ export default function NetworkPage() {
               type="text"
               value={searchQuery}
               onChange={(e) => handleSearchChange(e.target.value)}
-              placeholder="Search name or phone..."
+              placeholder={isVendor ? 'Search traders by name or phone...' : 'Search name or phone...'}
               className="w-full rounded-full bg-gray-100 py-2 pl-9 pr-8 text-sm text-gray-900 placeholder:text-gray-400 outline-none focus:ring-2 focus:ring-primary-500/20"
             />
             {searchQuery && (
@@ -294,7 +395,16 @@ export default function NetworkPage() {
             </button>
           ) : canInvite ? (
             <button
+              type="button"
               onClick={handleShareInvite}
+              title={
+                isVendor
+                  ? 'Share invite link — for someone not on GarmentHub yet'
+                  : 'Share invite link'
+              }
+              aria-label={
+                isVendor ? 'Share invite link for people not on GarmentHub' : 'Share invite link'
+              }
               className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gray-100 active:bg-gray-200"
             >
               <UserPlus className="h-4 w-4 text-gray-600" />
@@ -308,8 +418,16 @@ export default function NetworkPage() {
         {isSearchActive && (
           <div className="px-4">
             {debouncedQuery.length < 2 && (
-              <div className="py-8 flex flex-col items-center text-center">
+              <div className="py-8 flex flex-col items-center text-center gap-2">
                 <p className="text-sm text-gray-400">Type at least 2 characters to search</p>
+                {isVendor ? (
+                  <p className="text-xs text-gray-400 max-w-xs">
+                    Search finds traders already on GarmentHub — tap{' '}
+                    <span className="font-semibold text-gray-500">Connect</span> to add them. Use the{' '}
+                    <span className="font-semibold text-gray-500">+</span> button for an invite link if they are not on
+                    the app yet.
+                  </p>
+                ) : null}
               </div>
             )}
 
@@ -329,12 +447,27 @@ export default function NetworkPage() {
                       key={u.id}
                       user={u}
                       isFollowing={alreadyFollowing}
+                      inboundOnly={isVendor}
+                      onOpenDetail={
+                        isVendor && alreadyFollowing
+                          ? () => navigate(`/network/traders/${u.id}`)
+                          : undefined
+                      }
+                      onConnect={
+                        isVendor && !alreadyFollowing
+                          ? () => vendorConnectMutation.mutate(u.id)
+                          : undefined
+                      }
                       onToggle={() =>
                         alreadyFollowing
                           ? unfollowMutation.mutate(u.id)
                           : followMutation.mutate(u.id)
                       }
-                      loading={followMutation.isPending || unfollowMutation.isPending}
+                      loading={
+                        followMutation.isPending ||
+                        unfollowMutation.isPending ||
+                        vendorConnectMutation.isPending
+                      }
                       highlight={debouncedQuery}
                       showPhone={isPhoneSearch}
                     />
@@ -521,11 +654,11 @@ export default function NetworkPage() {
               </section>
             )}
 
-            {/* ── VENDOR: All following as horizontal cards ── */}
+            {/* ── VENDOR: Traders connected (follow you for updates) ── */}
             {isVendor && connections && connections.length > 0 && (
               <section className="pt-4">
                 <div className="flex items-center px-4 pb-3">
-                  <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">Following</p>
+                  <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">Connected traders</p>
                   <span className="ml-2 rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-bold text-gray-500">
                     {connections.length}
                   </span>
@@ -536,7 +669,16 @@ export default function NetworkPage() {
                     return (
                       <div
                         key={c.id}
-                        className="flex w-[140px] shrink-0 flex-col items-center gap-2 rounded-2xl border border-gray-100 bg-white p-4 shadow-sm"
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => navigate(`/network/traders/${c.id}`)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            navigate(`/network/traders/${c.id}`);
+                          }
+                        }}
+                        className="flex w-[140px] shrink-0 cursor-pointer flex-col items-center gap-2 rounded-2xl border border-gray-100 bg-white p-4 shadow-sm active:bg-gray-50/80"
                       >
                         <Avatar name={name} size="lg" />
                         <div className="w-full text-center min-w-0">
@@ -544,11 +686,15 @@ export default function NetworkPage() {
                           {c.role && <RoleBadge role={c.role} />}
                         </div>
                         <button
-                          onClick={() => unfollowMutation.mutate(c.id)}
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            unfollowMutation.mutate(c.id);
+                          }}
                           disabled={unfollowMutation.isPending}
                           className="w-full rounded-lg bg-gray-100 py-1.5 text-xs font-bold text-gray-500 active:bg-gray-200 disabled:opacity-50"
                         >
-                          Following
+                          Disconnect
                         </button>
                       </div>
                     );
@@ -635,6 +781,8 @@ export default function NetworkPage() {
                 <p className="text-sm text-gray-400 mb-4">
                   {isCustomer
                     ? 'Search for traders to follow and get curated product recommendations'
+                    : isVendor
+                      ? 'Search for traders already on GarmentHub and tap Connect. Use Share invite or + for someone not on the app yet — they can join and follow you for updates.'
                     : canInvite
                       ? 'Share your invite code to connect'
                       : 'Search for vendors and traders to follow'}

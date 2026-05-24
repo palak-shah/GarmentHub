@@ -13,6 +13,7 @@ import { Badge } from '@/components/ui/Badge';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { formatPrice } from '@/utils/formatters';
 import { mediaUrl } from '@/utils/mediaUrl';
+import { apiErrorMessage } from '@/utils/apiError';
 
 export default function VendorProductList() {
   useScrollRestore('vendor-products');
@@ -25,11 +26,19 @@ export default function VendorProductList() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uploadTargetRef = useRef<string | null>(null);
 
-  const { data: products, isLoading } = useQuery({
+  const {
+    data: products,
+    isPending,
+    isError,
+    error: productsError,
+    refetch: refetchProducts,
+  } = useQuery({
     queryKey: ['vendor-products', userId],
     queryFn: () => productApi.getMyProducts(),
     enabled: !!userId,
   });
+
+  const isLoading = !!userId && isPending;
 
   const triggerAddPhotos = useCallback((productId: string) => {
     uploadTargetRef.current = productId;
@@ -300,6 +309,18 @@ export default function VendorProductList() {
             {Array.from({ length: 4 }).map((_, i) => (
               <div key={i} className="flex gap-3 rounded-xl bg-gray-200 h-24 animate-pulse" />
             ))}
+          </div>
+        ) : isError ? (
+          <div className="rounded-xl border border-red-100 bg-red-50 px-4 py-6 text-center">
+            <p className="text-sm font-semibold text-red-800">Couldn’t load your products</p>
+            <p className="mt-2 text-xs text-red-600/90">{apiErrorMessage(productsError, 'Something went wrong')}</p>
+            <button
+              type="button"
+              onClick={() => void refetchProducts()}
+              className="mt-4 rounded-full bg-red-700 px-4 py-2 text-sm font-semibold text-white active:bg-red-800"
+            >
+              Retry
+            </button>
           </div>
         ) : !products || products.length === 0 ? (
           <EmptyState

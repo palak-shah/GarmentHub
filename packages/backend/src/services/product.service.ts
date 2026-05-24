@@ -13,18 +13,56 @@ const categoryAttrInclude = {
   attributes: { orderBy: [{ sortOrder: 'asc' as const }, { name: 'asc' as const }] },
 };
 
-async function enrichProduct<T extends { attributeValues: unknown; categoryId: string; vendorId: string; fabric: string; pattern: string; color: string }>(
+type CategoryWithAttrsLoaded = NonNullable<
+  Prisma.CategoryGetPayload<{ include: typeof categoryAttrInclude }>
+>;
+
+function categoryAttrsFromProduct(product: unknown): CategoryWithAttrsLoaded | null {
+  if (!product || typeof product !== 'object') return null;
+  const cat = 'category' in product ? (product as { category?: unknown }).category : null;
+  if (!cat || typeof cat !== 'object' || !('attributes' in cat)) return null;
+  if (!Array.isArray((cat as { attributes?: unknown }).attributes)) return null;
+  return cat as CategoryWithAttrsLoaded;
+}
+
+async function enrichProduct<
+  T extends {
+    attributeValues: unknown;
+    categoryId: string;
+    vendorId: string;
+    fabric: string;
+    pattern: string;
+    color: string;
+    id?: string;
+  },
+>(
   product: T,
-) {
+): Promise<
+  T & {
+    displayAttributes: { label: string; value: string }[];
+    imageAssets: { id: string; url: string; createdAt: Date }[];
+  }
+> {
   const values = jsonToStringRecord(product.attributeValues);
-  const cat = await prisma.category.findUnique({
-    where: { id: product.categoryId },
-    include: categoryAttrInclude,
-  });
-  const vendAttrs = await prisma.vendorCategoryAttribute.findMany({
-    where: { vendorId: product.vendorId, categoryId: product.categoryId },
-    orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
-  });
+  const pid = product.id;
+
+  const prefetchedCat = categoryAttrsFromProduct(product);
+
+  const [imageAssets, cat, vendAttrs] = await Promise.all([
+    pid
+      ? ProductService.ensureProductImagesLoaded(pid, (product as { images?: unknown }).images)
+      : Promise.resolve([] as { id: string; url: string; createdAt: Date }[]),
+    prefetchedCat
+      ? Promise.resolve(prefetchedCat)
+      : prisma.category.findUnique({
+          where: { id: product.categoryId },
+          include: categoryAttrInclude,
+        }),
+    prisma.vendorCategoryAttribute.findMany({
+      where: { vendorId: product.vendorId, categoryId: product.categoryId },
+      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+    }),
+  ]);
 
   const displayAttributes: { label: string; value: string }[] = [];
   if (cat) {
@@ -44,10 +82,84 @@ async function enrichProduct<T extends { attributeValues: unknown; categoryId: s
     if (product.color) displayAttributes.push({ label: 'Color', value: product.color });
   }
 
-  return { ...product, displayAttributes };
+  return { ...product, displayAttributes, imageAssets };
 }
 
 export class ProductService {
+  /** Keeps `product_images` in sync with the legacy `images` string array (newest rows get later upload time). */
+  static async syncProductImages(productId: string, urls: string[]) {
+    const trimmed = [...new Set(urls.map((u) => String(u).trim()).filter(Boolean))];
+    if (trimmed.length === 0) {
+      await prisma.productImage.deleteMany({ where: { productId } });
+      return;
+    }
+    await prisma.productImage.deleteMany({
+      where: { productId, url: { notIn: trimmed } },
+    });
+    await prisma.productImage.createMany({
+      data: trimmed.map((url) => ({ productId, url })),
+      skipDuplicates: true,
+    });
+  }
+
+  /** Loads timestamped gallery rows (+ one legacy `images[]` sync) — shared by enrich and trader gallery API. */
+  static async ensureProductImagesLoaded(
+    productId: string,
+    legacyImages: unknown,
+  ): Promise<{ id: string; url: string; createdAt: Date }[]> {
+    let rows = await prisma.productImage.findMany({
+      where: { productId },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, url: true, createdAt: true },
+    });
+    if (
+      rows.length === 0 &&
+      Array.isArray(legacyImages) &&
+      legacyImages.some((u) => String(u ?? '').trim().length > 0)
+    ) {
+      await ProductService.syncProductImages(
+        productId,
+        legacyImages.map((x) => String(x)),
+      );
+      rows = await prisma.productImage.findMany({
+        where: { productId },
+        orderBy: { createdAt: 'desc' },
+        select: { id: true, url: true, createdAt: true },
+      });
+    }
+    return rows;
+  }
+
+  static async getTraderGallery(id: string) {
+    const row = await prisma.product.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        name: true,
+        images: true,
+        vendor: { select: { id: true, name: true, businessName: true } },
+      },
+    });
+    if (!row) throw new NotFoundError('Product');
+    const legacyUrls = Array.isArray(row.images)
+      ? [...new Set(row.images.map((u) => String(u).trim()).filter(Boolean))]
+      : [];
+    if (legacyUrls.length > 0) {
+      await ProductService.syncProductImages(row.id, legacyUrls);
+    }
+    const imageAssets = await prisma.productImage.findMany({
+      where: { productId: row.id },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, url: true, createdAt: true },
+    });
+    return {
+      id: row.id,
+      name: row.name,
+      vendor: row.vendor,
+      imageAssets,
+    };
+  }
+
   static async list(query: ProductQueryDto) {
     const where: Prisma.ProductWhereInput = { status: 'ACTIVE' };
 
@@ -95,20 +207,23 @@ export class ProductService {
         vendor: { select: { id: true, name: true, businessName: true, phone: true } },
         trader: { select: { id: true, name: true, businessName: true } },
         brand: true,
-        category: true,
+        category: { include: categoryAttrInclude },
       },
     });
     if (!product) throw new NotFoundError('Product');
     return enrichProduct(product);
   }
 
+  /** Vendor “My Products” — list-only: no per-row enrich (avoids N× category work + failure modes that blank the whole list). */
   static async getByVendor(vendorId: string) {
-    const products = await prisma.product.findMany({
+    return prisma.product.findMany({
       where: { vendorId },
-      include: { brand: true, category: true },
+      include: {
+        brand: true,
+        category: { select: { id: true, name: true } },
+      },
       orderBy: { createdAt: 'desc' },
     });
-    return Promise.all(products.map((p) => enrichProduct(p)));
   }
 
   static async create(vendorId: string, data: CreateProductDto) {
@@ -133,6 +248,7 @@ export class ProductService {
       },
       include: { brand: true, category: { include: categoryAttrInclude } },
     });
+    await ProductService.syncProductImages(product.id, product.images ?? []);
 
     const vendor = await prisma.user.findUnique({
       where: { id: vendorId },
@@ -181,6 +297,9 @@ export class ProductService {
       },
       include: { brand: true, category: { include: categoryAttrInclude } },
     });
+    if (data.images !== undefined) {
+      await ProductService.syncProductImages(id, updated.images ?? []);
+    }
     return enrichProduct(updated);
   }
 

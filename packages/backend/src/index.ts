@@ -50,6 +50,26 @@ app.use((req, res) => {
 
 app.use(errorHandler);
 
-app.listen(env.port, () => {
+const server = app.listen(env.port, () => {
   console.log(`GarmentHub API running on port ${env.port}`);
 });
+
+server.on('error', (err: NodeJS.ErrnoException) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(
+      `\nPort ${env.port} is already in use — another process (often a previous API run) still holds it.\n`,
+      `Close that terminal tab or stop the other Node process, then try again.\n`,
+      `Windows:  netstat -ano | findstr :${env.port}   then   taskkill /PID <pid> /F\n`,
+    );
+  } else {
+    console.error('Failed to start server:', err);
+  }
+  process.exit(1);
+});
+
+function shutdown() {
+  server.close(() => process.exit(0));
+  setTimeout(() => process.exit(1), 5000).unref();
+}
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);

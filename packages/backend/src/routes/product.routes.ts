@@ -17,6 +17,8 @@ productRoutes.delete('/save/:productId', authenticate, ProductController.unsaveP
 /** Must be before `/:id` — otherwise PUT /bulk-update is handled as update(id=bulk-update). */
 productRoutes.post('/bulk-delete', authenticate, authorize('VENDOR'), ProductController.bulkDelete);
 productRoutes.put('/bulk-update', authenticate, authorize('VENDOR'), ProductController.bulkUpdate);
+/** Before `/:id` — trader photo grid (small JSON, no category/display-attribute work). */
+productRoutes.get('/:id/gallery', ProductController.getTraderGallery);
 productRoutes.get('/:id', ProductController.getById);
 productRoutes.post('/', authenticate, authorize('VENDOR'), validate(createProductDto), ProductController.create);
 productRoutes.put('/:id', authenticate, authorize('VENDOR'), validate(updateProductDto), ProductController.update);

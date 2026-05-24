@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { LogOut } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { LogOut, UsersRound } from 'lucide-react';
 import { authApi } from '@/api/auth.api';
 import { useAuthStore } from '@/store/authStore';
 import { Header } from '@/components/layout/Header';
@@ -58,6 +59,21 @@ export default function ProfilePage() {
           <p className="text-xs text-gray-400">Role</p>
           <p className="text-sm font-semibold text-gray-900 capitalize">{user?.role?.toLowerCase()}</p>
         </div>
+
+        {user?.role === 'TRADER' && (
+          <Link
+            to="/trader/groups"
+            className="flex w-full items-center gap-3 rounded-2xl border border-gray-100 bg-white px-4 py-3.5 shadow-sm active:bg-gray-50 min-h-[52px]"
+          >
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary-50 text-primary-600">
+              <UsersRound className="h-5 w-5" />
+            </div>
+            <div className="flex-1 text-left">
+              <p className="text-sm font-semibold text-gray-900">Customer groups</p>
+              <p className="text-xs text-gray-400">Organize buyers and share products to a group</p>
+            </div>
+          </Link>
+        )}
 
         <button
           onClick={() => save.mutate()}

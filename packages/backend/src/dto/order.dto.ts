@@ -21,6 +21,8 @@ export const createOrderDto = z
         z.object({
           productId: z.string().min(1),
           quantity: z.coerce.number().int().positive(),
+          /** Matches a shared catalog photo when ordering from picker flow. */
+          productImageId: z.preprocess((v) => (v === null || v === '' ? undefined : v), z.string().min(1).optional()),
         }),
       )
       .min(1),

@@ -10,13 +10,14 @@ import { NotificationService } from './notification.service';
 import { OrderStatus, ItemStatus, OrderMode, WorkflowState } from '@prisma/client';
 
 export class OrderService {
-  /** Latest curated-share line per product (trader offer) for this buyer + trader. */
-  private static async traderTargetsFromCuratedShares(
+  /** Trader offer per order line (prefer share line matching productImageId). */
+  private static async traderOfferForOrderLines(
     customerId: string,
     traderId: string,
-    productIds: string[],
+    items: { productId: string; productImageId?: string }[],
   ): Promise<Map<string, number>> {
     const map = new Map<string, number>();
+    const productIds = [...new Set(items.map((i) => i.productId))];
     if (productIds.length === 0) return map;
 
     const rows = await prisma.curatedShareProduct.findMany({
@@ -30,31 +31,46 @@ export class OrderService {
       },
       select: {
         productId: true,
+        productImageId: true,
         traderOfferUnitPrice: true,
         curatedShare: { select: { createdAt: true } },
       },
     });
 
-    const best = new Map<string, { price: number; at: number }>();
-    for (const r of rows) {
-      if (r.traderOfferUnitPrice == null) continue;
-      const t = r.curatedShare.createdAt.getTime();
-      const prev = best.get(r.productId);
-      if (!prev || t > prev.at) {
-        best.set(r.productId, { price: r.traderOfferUnitPrice, at: t });
+    for (const item of items) {
+      const candidates = rows
+        .filter((r) => r.productId === item.productId)
+        .sort((a, b) => b.curatedShare.createdAt.getTime() - a.curatedShare.createdAt.getTime());
+      if (candidates.length === 0) continue;
+      const pick = item.productImageId
+        ? candidates.find((r) => r.productImageId === item.productImageId) ?? candidates[0]
+        : candidates[0];
+      if (pick.traderOfferUnitPrice != null) {
+        map.set(`${item.productId}::${item.productImageId ?? ''}`, pick.traderOfferUnitPrice);
       }
     }
-    for (const [pid, v] of best) map.set(pid, v.price);
     return map;
   }
 
   static async create(customerId: string, data: CreateOrderDto) {
+    const productIdsUnique = [...new Set(data.items.map((i) => i.productId))];
+
     const products = await prisma.product.findMany({
-      where: { id: { in: data.items.map((i) => i.productId) }, status: 'ACTIVE' },
+      where: { id: { in: productIdsUnique }, status: 'ACTIVE' },
     });
 
-    if (products.length !== data.items.length) {
+    if (products.length !== productIdsUnique.length) {
       throw new AppError(400, 'One or more products not found or inactive');
+    }
+
+    const productById = new Map(products.map((p) => [p.id, p]));
+
+    for (const item of data.items) {
+      if (!item.productImageId) continue;
+      const img = await prisma.productImage.findFirst({
+        where: { id: item.productImageId, productId: item.productId },
+      });
+      if (!img) throw new AppError(400, 'Invalid product photo for order line');
     }
 
     // Prefer explicit trader (e.g. curated share); else first followed trader.
@@ -77,23 +93,23 @@ export class OrderService {
     // Managed flow only when a trader is linked; otherwise checkout as direct (vendors notified).
     const isManaged = wantsManaged && traderId != null;
 
-    const favoredByProduct =
+    const favoredByLine =
       traderId != null
-        ? await this.traderTargetsFromCuratedShares(
-            customerId,
-            traderId,
-            data.items.map((i) => i.productId),
-          )
+        ? await this.traderOfferForOrderLines(customerId, traderId, data.items)
         : new Map<string, number>();
 
     const orderItems = data.items.map((item) => {
-      const product = products.find((p) => p.id === item.productId)!;
-      const favored = favoredByProduct.get(item.productId);
+      const product = productById.get(item.productId)!;
+      const k = `${item.productId}::${item.productImageId ?? ''}`;
+      const favored =
+        favoredByLine.get(k) ??
+        favoredByLine.get(`${item.productId}::`);
       return {
         productId: item.productId,
         vendorId: product.vendorId,
         requestedQty: item.quantity,
         status: ItemStatus.PENDING,
+        ...(item.productImageId ? { productImageId: item.productImageId } : {}),
         ...(favored != null ? { traderTargetUnitPrice: favored } : {}),
       };
     });

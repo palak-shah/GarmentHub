@@ -16,6 +16,17 @@ export interface ConnectionUser {
   phone?: string;
 }
 
+export interface TraderInsightsResponse {
+  trader: ConnectionUser;
+  stats: {
+    ordersCount: number;
+    uniqueBuyersFromOrders: number;
+    buyersFollowingTrader: number;
+    curatedShareRecipients: number;
+    activeProductsWithTrader: number;
+  };
+}
+
 export const networkApi = {
   getStories: () =>
     api.get<ApiResponse<StoryUser[]>>('/network/stories').then((r) => r.data.data),
@@ -40,4 +51,11 @@ export const networkApi = {
 
   connectViaInvite: (code: string) =>
     api.post<ApiResponse<{ id: string; name: string; businessName?: string }>>('/network/connect-invite', { code }).then((r) => r.data.data),
+
+  /** Vendor: link an existing trader on GarmentHub (search). Use share invite for people not on the app. */
+  connectTrader: (traderId: string) =>
+    api.post<ApiResponse<unknown>>(`/network/connect-trader/${traderId}`).then((r) => r.data),
+
+  getTraderInsights: (traderId: string) =>
+    api.get<ApiResponse<TraderInsightsResponse>>(`/network/traders/${traderId}/insights`).then((r) => r.data.data),
 };

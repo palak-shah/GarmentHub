@@ -1,5 +1,6 @@
+import { OrderStatus } from '@prisma/client';
 import { prisma } from '../config/db';
-import { AppError } from '../utils/errors';
+import { AppError, ForbiddenError, NotFoundError } from '../utils/errors';
 
 export class NetworkService {
   static async getStories(userId: string) {
@@ -43,6 +44,9 @@ export class NetworkService {
         }
       }
       vendorScope = [...new Set([...directVendorIds, ...indirectVendorIds])];
+    } else if (user?.role === 'VENDOR') {
+      // Vendors do not follow others; "stories" = this vendor's own recent uploads.
+      vendorScope = [userId];
     } else {
       vendorScope = followedIds;
     }
@@ -77,6 +81,26 @@ export class NetworkService {
   }
 
   static async getConnections(userId: string) {
+    const me = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { role: true },
+    });
+
+    if (me?.role === 'VENDOR') {
+      // Inbound only: traders who follow this vendor (vendors never follow traders).
+      const inbound = await prisma.connection.findMany({
+        where: { followingId: userId },
+        include: {
+          follower: {
+            select: { id: true, name: true, businessName: true, role: true },
+          },
+        },
+      });
+      return inbound
+        .filter((c) => c.follower.role === 'TRADER')
+        .map((c) => c.follower);
+    }
+
     const connections = await prisma.connection.findMany({
       where: { followerId: userId },
       include: {
@@ -107,8 +131,10 @@ export class NetworkService {
     const suggestRoles =
       user?.role === 'TRADER' ? ['VENDOR', 'CUSTOMER'] :
       user?.role === 'CUSTOMER' ? ['TRADER'] :
-      user?.role === 'VENDOR' ? ['TRADER'] :
+      user?.role === 'VENDOR' ? [] :
       ['VENDOR', 'TRADER', 'CUSTOMER'];
+
+    if (suggestRoles.length === 0) return [];
 
     return prisma.user.findMany({
       where: {
@@ -127,23 +153,90 @@ export class NetworkService {
       throw new AppError(400, 'You cannot follow yourself');
     }
 
+    const follower = await prisma.user.findUnique({
+      where: { id: followerId },
+      select: { role: true },
+    });
+    if (follower?.role === 'VENDOR') {
+      throw new AppError(400, 'Vendors cannot follow other users; traders follow you.');
+    }
+
     return prisma.connection.create({
       data: { followerId, followingId },
     });
   }
 
-  static async unfollow(followerId: string, followingId: string) {
+  /**
+   * Vendor-only: connect an existing trader on the app (same edge as trader following the vendor).
+   * Use invite link for people not yet on GarmentHub.
+   */
+  static async vendorConnectTrader(vendorId: string, traderId: string) {
+    if (vendorId === traderId) {
+      throw new AppError(400, 'Invalid trader');
+    }
+
+    const vendor = await prisma.user.findUnique({
+      where: { id: vendorId },
+      select: { role: true },
+    });
+    if (vendor?.role !== 'VENDOR') {
+      throw new ForbiddenError('Only vendors can connect traders');
+    }
+
+    const trader = await prisma.user.findUnique({
+      where: { id: traderId },
+      select: { id: true, role: true, isActive: true },
+    });
+    if (!trader || !trader.isActive) {
+      throw new NotFoundError('User');
+    }
+    if (trader.role !== 'TRADER') {
+      throw new AppError(400, 'You can only connect traders');
+    }
+
+    await prisma.connection.upsert({
+      where: { followerId_followingId: { followerId: traderId, followingId: vendorId } },
+      create: { followerId: traderId, followingId: vendorId },
+      update: {},
+    });
+  }
+
+  /**
+   * Non-vendor: delete my outbound follow (I was following `followingId`).
+   * Vendor: remove a trader from my list — delete their inbound edge (trader followed me).
+   */
+  static async unfollow(viewerId: string, targetUserId: string) {
+    const viewer = await prisma.user.findUnique({
+      where: { id: viewerId },
+      select: { role: true },
+    });
+    if (viewer?.role === 'VENDOR') {
+      return prisma.connection.delete({
+        where: {
+          followerId_followingId: { followerId: targetUserId, followingId: viewerId },
+        },
+      });
+    }
     return prisma.connection.delete({
-      where: { followerId_followingId: { followerId, followingId } },
+      where: { followerId_followingId: { followerId: viewerId, followingId: targetUserId } },
     });
   }
 
   static async searchUsers(query: string, currentUserId: string) {
+    const me = await prisma.user.findUnique({
+      where: { id: currentUserId },
+      select: { role: true },
+    });
+    const roleFilter =
+      me?.role === 'VENDOR'
+        ? { role: 'TRADER' as const }
+        : { role: { not: 'ADMIN' as const } };
+
     return prisma.user.findMany({
       where: {
         id: { not: currentUserId },
         isActive: true,
-        role: { not: 'ADMIN' },
+        ...roleFilter,
         OR: [
           { name: { contains: query, mode: 'insensitive' } },
           { businessName: { contains: query, mode: 'insensitive' } },
@@ -168,6 +261,77 @@ export class NetworkService {
       data: { inviteCode: code },
     });
     return code;
+  }
+
+  /**
+   * Vendor-only: stats for a connected trader (they follow the vendor).
+   */
+  static async getTraderInsightsForVendor(vendorId: string, traderId: string) {
+    const vendor = await prisma.user.findUnique({
+      where: { id: vendorId },
+      select: { role: true },
+    });
+    if (vendor?.role !== 'VENDOR') {
+      throw new ForbiddenError('Only vendors can view trader insights');
+    }
+
+    const trader = await prisma.user.findUnique({
+      where: { id: traderId },
+      select: { id: true, name: true, businessName: true, role: true, phone: true },
+    });
+    if (!trader || trader.role !== 'TRADER') {
+      throw new NotFoundError('Trader');
+    }
+
+    const linked = await prisma.connection.findUnique({
+      where: { followerId_followingId: { followerId: traderId, followingId: vendorId } },
+    });
+    if (!linked) {
+      throw new AppError(403, 'This trader is not connected to you');
+    }
+
+    const [orderItems, buyersFollowingTrader, curatedRecipientRows, activeProductsWithTrader] =
+      await Promise.all([
+        prisma.orderItem.findMany({
+          where: {
+            vendorId,
+            order: {
+              traderId,
+              releasedToVendorsAt: { not: null },
+              status: { not: OrderStatus.CANCELLED },
+            },
+          },
+          select: { orderId: true, order: { select: { customerId: true } } },
+        }),
+        prisma.connection.count({
+          where: {
+            followingId: traderId,
+            follower: { role: 'CUSTOMER', isActive: true },
+          },
+        }),
+        prisma.curatedShareRecipient.findMany({
+          where: { curatedShare: { traderId } },
+          select: { customerId: true },
+        }),
+        prisma.product.count({
+          where: { vendorId, traderId, status: 'ACTIVE' },
+        }),
+      ]);
+
+    const orderIds = new Set(orderItems.map((i) => i.orderId));
+    const buyerIdsFromOrders = new Set(orderItems.map((i) => i.order.customerId));
+    const curatedReach = new Set(curatedRecipientRows.map((r) => r.customerId)).size;
+
+    return {
+      trader,
+      stats: {
+        ordersCount: orderIds.size,
+        uniqueBuyersFromOrders: buyerIdsFromOrders.size,
+        buyersFollowingTrader: buyersFollowingTrader,
+        curatedShareRecipients: curatedReach,
+        activeProductsWithTrader: activeProductsWithTrader,
+      },
+    };
   }
 
   static async connectViaInvite(inviteCode: string, followerId: string) {

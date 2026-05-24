@@ -15,6 +15,7 @@ import { PageSpinner } from '@/components/ui/Spinner';
 import { Combobox, StringCombobox } from '@/components/ui/Combobox';
 import type { FilterOptions, VendorCatalogCategory } from '@/types';
 import { mediaUrl } from '@/utils/mediaUrl';
+import { apiErrorMessage } from '@/utils/apiError';
 import { useAuthStore } from '@/store/authStore';
 
 /** Last server version we hydrated from per product (survives Strict Mode remounts). */
@@ -127,7 +128,7 @@ export default function ProductForm() {
       toast.success('Product created');
       navigate('/vendor/products');
     },
-    onError: () => toast.error('Failed to create product'),
+    onError: (err) => toast.error(apiErrorMessage(err, 'Failed to create product')),
   });
 
   const updateMut = useMutation({
@@ -138,7 +139,7 @@ export default function ProductForm() {
       toast.success('Product updated');
       navigate('/vendor/products');
     },
-    onError: () => toast.error('Failed to update product'),
+    onError: (err) => toast.error(apiErrorMessage(err, 'Failed to update product')),
   });
 
   const makeMainAt = (index: number) => {
@@ -402,19 +403,34 @@ export default function ProductForm() {
               const files = input.files?.length ? Array.from(input.files) : [];
               input.value = '';
               if (!files.length) return;
+              /** Default 2 files per POST so strict nginx (e.g. 1m body) still works. After raising `client_max_body_size`, set `VITE_UPLOAD_IMAGE_CHUNK` (1–20) in `.env` for larger batches. */
+              const rawChunk = import.meta.env.VITE_UPLOAD_IMAGE_CHUNK;
+              const parsedChunk =
+                rawChunk != null && String(rawChunk).trim() !== ''
+                  ? parseInt(String(rawChunk), 10)
+                  : NaN;
+              const UPLOAD_CHUNK = Number.isFinite(parsedChunk)
+                ? Math.min(20, Math.max(1, parsedChunk))
+                : 2;
               setUploadBatchCount(files.length);
               setUploadingImages(true);
               try {
-                const { urls } = await uploadApi.postProductImages(files, isEdit && id ? id : undefined);
-                if (urls.length === 0) {
+                const productId = isEdit && id ? id : undefined;
+                const allUrls: string[] = [];
+                for (let i = 0; i < files.length; i += UPLOAD_CHUNK) {
+                  const chunk = files.slice(i, i + UPLOAD_CHUNK);
+                  const { urls } = await uploadApi.postProductImages(chunk, productId);
+                  allUrls.push(...urls);
+                  setImageUrls((prev) => [...prev, ...urls]);
+                }
+                if (allUrls.length === 0) {
                   toast.error('No images were saved. Check that the API is running and you are logged in as a vendor.');
                   return;
                 }
-                setImageUrls((prev) => [...prev, ...urls]);
                 if (isEdit && id) {
                   queryClient.invalidateQueries({ queryKey: ['vendor-products'] });
                 }
-                toast.success(urls.length === 1 ? 'Photo added' : `${urls.length} photos added`);
+                toast.success(allUrls.length === 1 ? 'Photo added' : `${allUrls.length} photos added`);
               } catch (e) {
                 console.error(e);
                 toast.error(e instanceof Error ? e.message : 'Could not upload photos');

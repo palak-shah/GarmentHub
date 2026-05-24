@@ -11,6 +11,10 @@ export const authApi = {
   getProfile: () =>
     api.get<ApiResponse<User>>('/auth/me').then((r) => r.data.data),
 
-  updateProfile: (data: { name?: string; businessName?: string; address?: string }) =>
-    api.put<ApiResponse<User>>('/auth/me', data).then((r) => r.data.data),
+  updateProfile: (data: {
+    name?: string;
+    businessName?: string;
+    address?: string;
+    role?: 'CUSTOMER' | 'VENDOR' | 'TRADER';
+  }) => api.put<ApiResponse<User>>('/auth/me', data).then((r) => r.data.data),
 };

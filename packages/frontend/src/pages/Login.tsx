@@ -34,6 +34,7 @@ export default function Login() {
   const [searchParams] = useSearchParams();
   const inviteCode = searchParams.get('invite');
   const setAuth = useAuthStore((s) => s.setAuth);
+  const updateUser = useAuthStore((s) => s.updateUser);
   const phoneRef = useRef<HTMLInputElement>(null);
   const codeRef = useRef<HTMLInputElement>(null);
 
@@ -54,6 +55,8 @@ export default function Login() {
     mutationFn: (vars: { role?: SelectedRole } = {}) => authApi.verifyOtp(phoneClean, code, vars.role),
     onSuccess: async (data) => {
       if (data.isNewUser && step === 'otp') {
+        // OTP is consumed on first verify; role step must use authenticated profile update.
+        setAuth(data.token, data.user);
         setStep('role');
         return;
       }
@@ -75,7 +78,28 @@ export default function Login() {
       else if (r === 'ADMIN') navigate('/admin', { replace: true });
       else navigate('/', { replace: true });
     },
-    onError: () => toast.error('Invalid OTP'),
+    onError: () => toast.error('Invalid or expired OTP'),
+  });
+
+  const completeSignupRole = useMutation({
+    mutationFn: (role: SelectedRole) => authApi.updateProfile({ role }),
+    onSuccess: async (user) => {
+      updateUser(user);
+      if (inviteCode) {
+        try {
+          const connected = await networkApi.connectViaInvite(inviteCode);
+          toast.success(`Connected with ${connected.businessName || connected.name}!`);
+        } catch {
+          // Silently ignore if invite code is invalid/expired
+        }
+      }
+      toast.success('Welcome!');
+      const r = user.role;
+      if (r === 'VENDOR') navigate('/vendor', { replace: true });
+      else if (r === 'ADMIN') navigate('/admin', { replace: true });
+      else navigate('/', { replace: true });
+    },
+    onError: () => toast.error('Could not save your role. Try again.'),
   });
 
   useEffect(() => {
@@ -199,8 +223,8 @@ export default function Login() {
                 type="button"
                 className="mt-5 w-full"
                 size="lg"
-                loading={verifyOtp.isPending}
-                onClick={() => verifyOtp.mutate({ role: selectedRole })}
+                loading={completeSignupRole.isPending}
+                onClick={() => completeSignupRole.mutate(selectedRole)}
               >
                 Continue
               </Button>

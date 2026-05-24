@@ -12,6 +12,18 @@ function parseCorsOrigins(): string[] {
     .filter(Boolean);
 }
 
+function clampInt(n: number, min: number, max: number): number {
+  if (!Number.isFinite(n)) return min;
+  return Math.min(max, Math.max(min, Math.trunc(n)));
+}
+
+const maxUploadFileMb = clampInt(parseInt(process.env.MAX_UPLOAD_FILE_MB || '20', 10), 1, 100);
+const maxUploadFilesPerRequest = clampInt(
+  parseInt(process.env.MAX_UPLOAD_FILES_PER_REQUEST || '20', 10),
+  1,
+  50,
+);
+
 /** Local runs often omit NODE_ENV (especially on Windows). Only treat explicit `production` as non-verbose. */
 export const env = {
   port: parseInt(process.env.PORT || '4000', 10),
@@ -26,4 +38,9 @@ export const env = {
    * When empty, CORS falls back to reflecting any `Origin` (legacy permissive behavior).
    */
   corsOrigins: parseCorsOrigins(),
+  /** Per-file cap for multipart product images (Multer). Reverse proxy may need a higher `client_max_body_size`. */
+  maxUploadFileMb,
+  maxUploadFileBytes: maxUploadFileMb * 1024 * 1024,
+  /** Max files in one POST /api/upload/images (must stay ≤ Multer `limits.files`). */
+  maxUploadFilesPerRequest,
 };

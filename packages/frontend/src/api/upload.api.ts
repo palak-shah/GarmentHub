@@ -42,15 +42,28 @@ export const uploadApi = {
     }
 
     const text = await res.text();
+    const looksHtml = /^\s*</.test(text) && /<\s*html/i.test(text);
+
     let json: unknown;
     try {
       json = JSON.parse(text);
     } catch {
-      const hint =
-        text.trimStart().startsWith('<!') || text.trimStart().startsWith('<html')
-          ? 'The server returned a page instead of JSON — is the backend running on port 4000?'
-          : text.slice(0, 200) || 'Upload failed';
-      throw new Error(hint);
+      if (res.status === 413) {
+        throw new Error(
+          'Upload rejected: the reverse proxy body limit is too small (common nginx default 1m). Add `client_max_body_size 100m;` (see packages/backend/docs/nginx-upload.example.conf) and reload nginx. If this still appears with only one photo, check another proxy layer (Cloudflare, host panel).',
+        );
+      }
+      if (res.status === 502 || res.status === 504) {
+        throw new Error(
+          'Upload failed: gateway or upstream timeout (502/504). The request may be too large; try 2–3 photos per batch.',
+        );
+      }
+      if (looksHtml) {
+        throw new Error(
+          'Upload failed: the server returned an HTML error page instead of JSON — often a proxy body-size limit (413) or gateway issue, not a stopped API. Try uploading 2–3 photos at a time. On nginx, increase `client_max_body_size` for your API. For local dev, use the Vite app on port 3000 with `npm run backend:dev` on port 4000.',
+        );
+      }
+      throw new Error(text.trim().slice(0, 240) || `Upload failed (${res.status})`);
     }
 
     if (res.status === 401) {

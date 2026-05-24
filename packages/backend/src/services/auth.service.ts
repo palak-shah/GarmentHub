@@ -5,6 +5,7 @@ import { OtpService } from './otp.service';
 import { AppError, NotFoundError } from '../utils/errors';
 import { UpdateProfileDto } from '../dto/auth.dto';
 import { Role } from '@prisma/client';
+import type { Prisma } from '@prisma/client';
 
 export class AuthService {
   static async sendOtp(phone: string) {
@@ -48,9 +49,27 @@ export class AuthService {
   }
 
   static async updateProfile(userId: string, data: UpdateProfileDto) {
+    const dataRole = data.role;
+    const { role: _omitRole, ...rest } = data;
+    const updateData: Prisma.UserUpdateInput = { ...rest };
+
+    if (dataRole !== undefined) {
+      const current = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { name: true, role: true },
+      });
+      if (!current) throw new NotFoundError('User');
+      const signupRolePick =
+        current.name === '' && current.role === Role.CUSTOMER;
+      if (!signupRolePick) {
+        throw new AppError(403, 'Role cannot be changed');
+      }
+      updateData.role = dataRole;
+    }
+
     return prisma.user.update({
       where: { id: userId },
-      data,
+      data: updateData,
       select: {
         id: true, phone: true, name: true, role: true,
         businessName: true, address: true, isActive: true, createdAt: true,

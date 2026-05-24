@@ -1,6 +1,7 @@
 import path from 'path';
 import { randomUUID } from 'crypto';
 import multer from 'multer';
+import { env } from '../config/env';
 import { PRODUCT_IMAGES_DIR, ensureUploadDirs } from '../config/uploadPaths';
 
 const productsDir = PRODUCT_IMAGES_DIR;
@@ -19,7 +20,7 @@ const storage = multer.diskStorage({
 
 export const uploadProductImages = multer({
   storage,
-  limits: { fileSize: 10 * 1024 * 1024, files: 50 },
+  limits: { fileSize: env.maxUploadFileBytes, files: 50 },
   fileFilter: (_req, file, cb) => {
     const mime = (file.mimetype || '').toLowerCase();
     const extOk = /\.(jpe?g|png|gif|webp|bmp|heic|heif|avif)$/i.test(file.originalname || '');

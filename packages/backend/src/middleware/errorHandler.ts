@@ -107,9 +107,9 @@ export function errorHandler(err: unknown, _req: Request, res: Response, _next: 
     if (err instanceof multer.MulterError) {
       const msg =
         err.code === 'LIMIT_FILE_SIZE'
-          ? 'Each image must be 5MB or smaller'
+          ? `Each image must be ${env.maxUploadFileMb}MB or smaller`
           : err.code === 'LIMIT_FILE_COUNT' || err.code === 'LIMIT_UNEXPECTED_FILE'
-            ? 'Too many images (max 10 per upload)'
+            ? `Too many images (max ${env.maxUploadFilesPerRequest} per upload)`
             : err.message;
       return res.status(400).json({ success: false, error: msg });
     }

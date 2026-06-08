@@ -16,9 +16,18 @@ type ImageViewerLightboxProps = {
   };
 };
 
+const MIN_ZOOM = 1;
+const MAX_ZOOM = 4;
+const DOUBLE_TAP_ZOOM = 2.5;
+const SWIPE_PX = 70;
+
+function touchDistance(a: React.Touch, b: React.Touch) {
+  return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+}
+
 /**
- * Full-screen photo viewer (WhatsApp-style): dark backdrop, contain-fit image,
- * prev/next, swipe, thumbnail strip, Escape / arrow keys.
+ * Full-screen photo viewer: dark backdrop, contain-fit image, prev/next, swipe,
+ * thumbnail strip, pinch / Ctrl+wheel zoom, double-tap zoom, Escape / arrow keys.
  */
 export function ImageViewerLightbox({
   open,
@@ -28,8 +37,33 @@ export function ImageViewerLightbox({
   manageActions,
 }: ImageViewerLightboxProps) {
   const [idx, setIdx] = useState(0);
+  const [zoom, setZoom] = useState({ scale: 1, tx: 0, ty: 0 });
   const thumbRowRef = useRef<HTMLDivElement>(null);
+  const mainRef = useRef<HTMLDivElement>(null);
   const touchStartX = useRef<number | null>(null);
+  const pinchStartDist = useRef<number | null>(null);
+  const pinchStartScale = useRef(1);
+  const panOrigin = useRef<{ x: number; y: number; tx: number; ty: number } | null>(null);
+  const gestureHadPinch = useRef(false);
+  const lastTap = useRef<{ t: number; x: number; y: number } | null>(null);
+  const scaleRef = useRef(1);
+  const zoomRef = useRef(zoom);
+
+  useEffect(() => {
+    scaleRef.current = zoom.scale;
+  }, [zoom.scale]);
+
+  useEffect(() => {
+    zoomRef.current = zoom;
+  }, [zoom]);
+
+  useEffect(() => {
+    if (open) lastTap.current = null;
+  }, [open]);
+
+  useEffect(() => {
+    setZoom({ scale: 1, tx: 0, ty: 0 });
+  }, [idx]);
 
   useEffect(() => {
     if (open && urls.length > 0) {
@@ -67,31 +101,120 @@ export function ImageViewerLightbox({
     };
   }, [open]);
 
+  const clampScale = useCallback((s: number) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, s)), []);
+
   const goPrev = useCallback(() => setIdx((i) => Math.max(0, i - 1)), []);
   const goNext = useCallback(() => setIdx((i) => Math.min(urls.length - 1, i + 1)), [urls.length]);
 
-  const onTouchStart = (e: React.TouchEvent) => {
-    touchStartX.current = e.touches[0].clientX;
-  };
-
-  const onTouchEnd = (e: React.TouchEvent) => {
-    if (touchStartX.current == null) return;
-    const dx = e.changedTouches[0].clientX - touchStartX.current;
-    touchStartX.current = null;
-    if (dx > 70) goPrev();
-    else if (dx < -70) goNext();
-  };
+  useEffect(() => {
+    const el = mainRef.current;
+    if (!open || !el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      const delta = -e.deltaY * 0.008;
+      setZoom((z) => ({ ...z, scale: clampScale(z.scale + delta) }));
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [open, clampScale]);
 
   useEffect(() => {
     if (!open || !thumbRowRef.current) return;
     const row = thumbRowRef.current;
-    const el = row.children[idx] as HTMLElement | undefined;
-    el?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+    const child = row.children[idx] as HTMLElement | undefined;
+    child?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
   }, [idx, open]);
+
+  const onTouchStartMain = (e: React.TouchEvent) => {
+    if (e.touches.length === 2) {
+      touchStartX.current = null;
+      panOrigin.current = null;
+      pinchStartDist.current = touchDistance(e.touches[0], e.touches[1]);
+      pinchStartScale.current = scaleRef.current;
+    } else if (e.touches.length === 1) {
+      const t = e.touches[0];
+      if (scaleRef.current <= 1.01) {
+        touchStartX.current = t.clientX;
+        panOrigin.current = null;
+      } else {
+        touchStartX.current = null;
+        panOrigin.current = {
+          x: t.clientX,
+          y: t.clientY,
+          tx: zoomRef.current.tx,
+          ty: zoomRef.current.ty,
+        };
+      }
+    }
+  };
+
+  const onTouchMoveMain = (e: React.TouchEvent) => {
+    if (e.touches.length === 2 && pinchStartDist.current != null && pinchStartDist.current > 10) {
+      e.preventDefault();
+      gestureHadPinch.current = true;
+      const d = touchDistance(e.touches[0], e.touches[1]);
+      const next = clampScale(pinchStartScale.current * (d / pinchStartDist.current));
+      setZoom((z) => ({ ...z, scale: next }));
+    } else if (e.touches.length === 1 && panOrigin.current && scaleRef.current > 1.01) {
+      e.preventDefault();
+      const t = e.touches[0];
+      setZoom((z) => ({
+        scale: z.scale,
+        tx: panOrigin.current!.tx + (t.clientX - panOrigin.current!.x),
+        ty: panOrigin.current!.ty + (t.clientY - panOrigin.current!.y),
+      }));
+    }
+  };
+
+  const onTouchEndMain = (e: React.TouchEvent) => {
+    if (e.touches.length > 0) {
+      if (e.touches.length === 1 && pinchStartDist.current != null) {
+        pinchStartDist.current = null;
+      }
+      return;
+    }
+
+    const ended = e.changedTouches[0];
+    const now = Date.now();
+    const lp = lastTap.current;
+
+    if (
+      !gestureHadPinch.current &&
+      lp &&
+      now - lp.t < 320 &&
+      Math.hypot(ended.clientX - lp.x, ended.clientY - lp.y) < 48
+    ) {
+      lastTap.current = null;
+      setZoom((z) =>
+        z.scale <= 1.05
+          ? { scale: DOUBLE_TAP_ZOOM, tx: 0, ty: 0 }
+          : { scale: 1, tx: 0, ty: 0 },
+      );
+      pinchStartDist.current = null;
+      touchStartX.current = null;
+      panOrigin.current = null;
+      gestureHadPinch.current = false;
+      return;
+    }
+    lastTap.current = { t: now, x: ended.clientX, y: ended.clientY };
+
+    if (!gestureHadPinch.current && scaleRef.current <= 1.01 && touchStartX.current != null) {
+      const dx = ended.clientX - touchStartX.current;
+      if (dx > SWIPE_PX) goPrev();
+      else if (dx < -SWIPE_PX) goNext();
+    }
+
+    pinchStartDist.current = null;
+    touchStartX.current = null;
+    panOrigin.current = null;
+    gestureHadPinch.current = false;
+  };
 
   if (!open || urls.length === 0) return null;
 
   const src = mediaUrl(urls[idx]);
+  const zoomed = zoom.scale > 1.02;
 
   return createPortal(
     <div
@@ -118,15 +241,19 @@ export function ImageViewerLightbox({
       </header>
 
       <div
-        className="relative flex min-h-0 flex-1 touch-pan-y items-center justify-center px-1"
-        onTouchStart={onTouchStart}
-        onTouchEnd={onTouchEnd}
+        ref={mainRef}
+        className={`relative flex min-h-0 flex-1 items-center justify-center overflow-hidden px-1 ${
+          zoomed ? 'touch-none' : 'touch-pan-y'
+        }`}
+        onTouchStart={onTouchStartMain}
+        onTouchMove={onTouchMoveMain}
+        onTouchEnd={onTouchEndMain}
       >
-        {idx > 0 && (
+        {idx > 0 && !zoomed && (
           <button
             type="button"
-            onClick={(e) => {
-              e.stopPropagation();
+            onClick={(ev) => {
+              ev.stopPropagation();
               goPrev();
             }}
             className="absolute left-0 z-10 rounded-full bg-black/45 p-2.5 text-white hover:bg-black/65 sm:left-2"
@@ -135,17 +262,25 @@ export function ImageViewerLightbox({
             <ChevronLeft className="h-8 w-8 sm:h-10 sm:w-10" />
           </button>
         )}
-        <img
-          src={src}
-          alt=""
-          className="max-h-full max-w-full object-contain select-none"
-          draggable={false}
-        />
-        {idx < urls.length - 1 && (
+        <div
+          className="flex max-h-full max-w-full items-center justify-center"
+          style={{
+            transform: `translate(${zoom.tx}px, ${zoom.ty}px) scale(${zoom.scale})`,
+            transformOrigin: 'center center',
+          }}
+        >
+          <img
+            src={src}
+            alt=""
+            className="max-h-full max-w-full object-contain select-none"
+            draggable={false}
+          />
+        </div>
+        {idx < urls.length - 1 && !zoomed && (
           <button
             type="button"
-            onClick={(e) => {
-              e.stopPropagation();
+            onClick={(ev) => {
+              ev.stopPropagation();
               goNext();
             }}
             className="absolute right-0 z-10 rounded-full bg-black/45 p-2.5 text-white hover:bg-black/65 sm:right-2"

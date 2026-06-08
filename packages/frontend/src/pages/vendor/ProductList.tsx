@@ -11,9 +11,14 @@ import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { ImageViewerLightbox } from '@/components/ui/ImageViewerLightbox';
 import { formatPrice } from '@/utils/formatters';
 import { mediaUrl } from '@/utils/mediaUrl';
 import { apiErrorMessage } from '@/utils/apiError';
+
+function productGalleryUrls(images: string[] | undefined): string[] {
+  return [...new Set((images ?? []).map((s) => String(s).trim()).filter(Boolean))];
+}
 
 export default function VendorProductList() {
   useScrollRestore('vendor-products');
@@ -23,6 +28,7 @@ export default function VendorProductList() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [selectMode, setSelectMode] = useState(false);
   const [uploadingProductId, setUploadingProductId] = useState<string | null>(null);
+  const [gallery, setGallery] = useState<{ urls: string[]; initialIndex: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uploadTargetRef = useRef<string | null>(null);
 
@@ -333,6 +339,8 @@ export default function VendorProductList() {
             {products.map((product) => {
               const isSelected = selected.has(product.id);
               const imgCount = product.images?.length ?? 0;
+              const galleryUrls = productGalleryUrls(product.images);
+              const canOpenGallery = !selectMode && galleryUrls.length > 0;
               return (
                 <div
                   key={product.id}
@@ -350,13 +358,39 @@ export default function VendorProductList() {
                       )}
                     </div>
                   )}
-                  <div className="relative h-[4.5rem] w-[4.5rem] shrink-0 overflow-hidden rounded-xl bg-gray-100 ring-1 ring-gray-200/80">
+                  <div
+                    className={`relative h-[4.5rem] w-[4.5rem] shrink-0 overflow-hidden rounded-xl bg-gray-100 ring-1 ring-gray-200/80 ${
+                      canOpenGallery ? 'cursor-zoom-in' : ''
+                    }`}
+                    role={canOpenGallery ? 'button' : undefined}
+                    tabIndex={canOpenGallery ? 0 : undefined}
+                    aria-label={canOpenGallery ? 'View product photos' : undefined}
+                    onClick={
+                      canOpenGallery
+                        ? (e) => {
+                            e.stopPropagation();
+                            setGallery({ urls: galleryUrls, initialIndex: 0 });
+                          }
+                        : undefined
+                    }
+                    onKeyDown={
+                      canOpenGallery
+                        ? (e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setGallery({ urls: galleryUrls, initialIndex: 0 });
+                            }
+                          }
+                        : undefined
+                    }
+                  >
                     {(product.images ?? [])[0] ? (
-                      <img src={mediaUrl(product.images[0])} alt="" className="h-full w-full object-cover" />
+                      <img src={mediaUrl(product.images[0])} alt="" className="h-full w-full object-cover pointer-events-none" />
                     ) : (
                       <div className="flex h-full items-center justify-center text-[10px] text-gray-400">—</div>
                     )}
-                    <span className="absolute bottom-0.5 right-0.5 min-w-[1.125rem] rounded bg-black/60 px-1 text-center text-[9px] font-bold text-white leading-tight">
+                    <span className="pointer-events-none absolute bottom-0.5 right-0.5 min-w-[1.125rem] rounded bg-black/60 px-1 text-center text-[9px] font-bold text-white leading-tight">
                       {imgCount}
                     </span>
                   </div>
@@ -476,6 +510,13 @@ export default function VendorProductList() {
           </div>
         )}
       </div>
+
+      <ImageViewerLightbox
+        open={gallery !== null}
+        onClose={() => setGallery(null)}
+        urls={gallery?.urls ?? []}
+        initialIndex={gallery?.initialIndex ?? 0}
+      />
     </>
   );
 }

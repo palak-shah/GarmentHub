@@ -2,6 +2,7 @@ import 'express-async-errors';
 import express from 'express';
 import cors from 'cors';
 import { ensureUploadDirs, UPLOADS_ROOT } from './config/uploadPaths';
+import { buildCorsOptions } from './config/corsOptions';
 import { env } from './config/env';
 import { errorHandler } from './middleware/errorHandler';
 import { authRoutes } from './routes/auth.routes';
@@ -20,13 +21,7 @@ const app = express();
 
 ensureUploadDirs();
 
-app.use(
-  cors(
-    env.corsOrigins.length > 0
-      ? { origin: env.corsOrigins }
-      : { origin: true },
-  ),
-);
+app.use(cors(buildCorsOptions()));
 app.use('/uploads', express.static(UPLOADS_ROOT));
 // Multipart uploads must run before express.json() (belt-and-suspenders for body parsing).
 app.use('/api/upload', uploadRoutes);

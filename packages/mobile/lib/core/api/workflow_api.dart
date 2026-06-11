@@ -21,7 +21,7 @@ class WorkflowApi {
   Future<Map<String, dynamic>> feedByState(String state, {String? cursor, int limit = 20}) async {
     final res = await _dio.get<Map<String, dynamic>>(
       '/workflow/feed',
-      queryParameters: {'state': state, if (cursor != null) 'cursor': cursor, 'limit': limit},
+      queryParameters: {'state': state, 'cursor': ?cursor, 'limit': limit},
     );
     return ApiResponse.unwrapData(res.data!, (d) => d as Map<String, dynamic>);
   }

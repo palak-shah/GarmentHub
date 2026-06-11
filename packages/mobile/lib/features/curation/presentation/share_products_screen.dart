@@ -46,7 +46,7 @@ class _ShareProductsScreenState extends ConsumerState<ShareProductsScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(apiErrorMessage(e))));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(apiErrorMessageVerbose(e))));
       }
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -57,30 +57,34 @@ class _ShareProductsScreenState extends ConsumerState<ShareProductsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Share products')),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          const Text('Comma-separated product IDs and customer IDs (trader flow).'),
-          const SizedBox(height: 12),
-          TextField(controller: _productIds, decoration: const InputDecoration(labelText: 'Product IDs')),
-          TextField(controller: _customerIds, decoration: const InputDecoration(labelText: 'Customer IDs')),
-          TextField(controller: _note, decoration: const InputDecoration(labelText: 'Note')),
-          const SizedBox(height: 12),
-          DropdownButtonFormField<String>(
-            value: _orderMode,
-            decoration: const InputDecoration(labelText: 'Order mode'),
-            items: const [
-              DropdownMenuItem(value: 'DIRECT', child: Text('Direct')),
-              DropdownMenuItem(value: 'MANAGED', child: Text('Managed')),
-            ],
-            onChanged: (v) => setState(() => _orderMode = v ?? 'DIRECT'),
-          ),
-          const SizedBox(height: 24),
-          FilledButton(
-            onPressed: _loading ? null : _submit,
-            child: _loading ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Send share'),
-          ),
-        ],
+      body: SafeArea(
+        child: ListView(
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+          padding: const EdgeInsets.all(16),
+          children: [
+            const Text('Comma-separated product IDs and customer IDs (trader flow).'),
+            const SizedBox(height: 12),
+            TextField(controller: _productIds, decoration: const InputDecoration(labelText: 'Product IDs')),
+            TextField(controller: _customerIds, decoration: const InputDecoration(labelText: 'Customer IDs')),
+            TextField(controller: _note, decoration: const InputDecoration(labelText: 'Note')),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              key: ValueKey(_orderMode),
+              initialValue: _orderMode,
+              decoration: const InputDecoration(labelText: 'Order mode'),
+              items: const [
+                DropdownMenuItem(value: 'DIRECT', child: Text('Direct')),
+                DropdownMenuItem(value: 'MANAGED', child: Text('Managed')),
+              ],
+              onChanged: (v) => setState(() => _orderMode = v ?? 'DIRECT'),
+            ),
+            const SizedBox(height: 24),
+            FilledButton(
+              onPressed: _loading ? null : _submit,
+              child: _loading ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Send share'),
+            ),
+          ],
+        ),
       ),
     );
   }

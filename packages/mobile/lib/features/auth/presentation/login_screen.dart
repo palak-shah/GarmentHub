@@ -45,7 +45,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     } catch (e) {
       setState(() => _loading = false);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(apiErrorMessage(e))));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(apiErrorMessageVerbose(e))));
       }
     }
   }
@@ -62,7 +62,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     } catch (e) {
       setState(() => _loading = false);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(apiErrorMessage(e))));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(apiErrorMessageVerbose(e))));
       }
     }
   }
@@ -71,9 +71,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Sign in')),
-      body: Padding(
-        padding: const EdgeInsets.all(24),
+      body: SafeArea(
         child: ListView(
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+          padding: const EdgeInsets.all(24),
           children: [
             TextField(
               controller: _phone,
@@ -82,8 +83,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             ),
             const SizedBox(height: 16),
             DropdownButtonFormField<String>(
+              key: ValueKey(_role ?? ''),
               decoration: const InputDecoration(labelText: 'Role (optional)'),
-              value: _role == null || _role!.isEmpty ? '' : _role,
+              initialValue: _role == null || _role!.isEmpty ? '' : _role,
               items: const [
                 DropdownMenuItem(value: '', child: Text('Default')),
                 DropdownMenuItem(value: 'CUSTOMER', child: Text('Buyer')),

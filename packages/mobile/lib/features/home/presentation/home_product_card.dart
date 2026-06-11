@@ -79,9 +79,9 @@ class HomeProductCard extends StatelessWidget {
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            if (photoCount != null && photoCount! > 1)
+                            if (photoCount != null && photoCount! > 0)
                               Text(
-                                '$photoCount shared photos',
+                                photoCount == 1 ? '1 shared photo' : '$photoCount shared photos',
                                 textAlign: TextAlign.center,
                                 style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600),
                               ),

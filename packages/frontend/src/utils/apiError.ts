@@ -6,6 +6,8 @@ type ErrorPayload = {
   details?: unknown;
 };
 
+const clientDebug = import.meta.env.VITE_CLIENT_DEBUG === 'true';
+
 function trimStr(v: unknown): string | null {
   if (typeof v === 'string' && v.trim()) return v.trim();
   return null;
@@ -55,11 +57,91 @@ function normalizeResponseData(data: unknown): unknown {
   return data;
 }
 
-/**
- * Reads GarmentHub API error JSON from axios (or axios-like) failures.
- * Does not rely solely on `axios.isAxiosError` — duplicate axios copies in the bundle can break that check.
- */
-export function apiErrorMessage(err: unknown, fallback: string): string {
+function truncate(s: string, max = 2000): string {
+  if (s.length <= max) return s;
+  return `${s.slice(0, max)}… [truncated, ${s.length} chars]`;
+}
+
+function safeJson(value: unknown): string {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function redactHeaders(h: unknown): unknown {
+  if (!h || typeof h !== 'object') return h;
+  if (typeof (h as { toJSON?: () => unknown }).toJSON === 'function') {
+    try {
+      h = (h as { toJSON: () => unknown }).toJSON();
+    } catch {
+      return '<unserializable headers>';
+    }
+  }
+  if (typeof h !== 'object' || h === null) return h;
+  const out: Record<string, unknown> = { ...(h as Record<string, unknown>) };
+  for (const k of Object.keys(out)) {
+    if (k.toLowerCase() === 'authorization' || k.toLowerCase() === 'cookie') {
+      out[k] = '<redacted>';
+    }
+  }
+  return out;
+}
+
+/** Technical details for developers when `VITE_CLIENT_DEBUG=true`. */
+export function formatAxiosLikeDebug(err: unknown): string {
+  const lines: string[] = [];
+
+  if (axios.isAxiosError(err)) {
+    lines.push('AxiosError');
+    lines.push(`code: ${err.code ?? '(none)'}`);
+    lines.push(`message: ${err.message}`);
+    if (err.config) {
+      lines.push(`method: ${String(err.config.method ?? '?').toUpperCase()}`);
+      lines.push(`url: ${axiosRequestPath(err) ?? '(unknown)'}`);
+      lines.push(`headers: ${truncate(safeJson(redactHeaders(err.config.headers)), 1500)}`);
+    }
+    lines.push(`status: ${err.response?.status ?? '(no response)'}`);
+    lines.push(`response.data: ${truncate(safeJson(normalizeResponseData(err.response?.data)), 2000)}`);
+    if (err.stack) lines.push(`stack:\n${err.stack}`);
+    return lines.join('\n');
+  }
+
+  if (err && typeof err === 'object' && 'response' in err) {
+    const ax = err as {
+      message?: string;
+      config?: { method?: string; baseURL?: string; url?: string; headers?: unknown };
+      response?: { status?: number; data?: unknown };
+      stack?: string;
+    };
+    const r = ax.response;
+    if (r) {
+      lines.push('axios-like error');
+      lines.push(`message: ${ax.message ?? '(none)'}`);
+      if (ax.config) {
+        lines.push(`method: ${String(ax.config.method ?? '?').toUpperCase()}`);
+        lines.push(`url: ${axiosRequestPath(ax as { config?: { baseURL?: string; url?: string } }) ?? '(unknown)'}`);
+        lines.push(`headers: ${truncate(safeJson(redactHeaders(ax.config.headers)), 1500)}`);
+      }
+      lines.push(`status: ${r.status ?? '(none)'}`);
+      lines.push(`response.data: ${truncate(safeJson(normalizeResponseData(r.data)), 2000)}`);
+      if (ax.stack) lines.push(`stack:\n${ax.stack}`);
+      return lines.join('\n');
+    }
+  }
+
+  if (err instanceof Error) {
+    lines.push(err.name);
+    lines.push(err.message);
+    if (err.stack) lines.push(`stack:\n${err.stack}`);
+    return lines.join('\n');
+  }
+
+  return truncate(String(err), 4000);
+}
+
+function apiErrorUserMessage(err: unknown, fallback: string): string {
   if (trimStr(err instanceof Error ? err.message : null) === 'Network Error') {
     return 'Network error — check your connection';
   }
@@ -105,7 +187,6 @@ export function apiErrorMessage(err: unknown, fallback: string): string {
     }
   }
 
-  // Duck-type: plain object with response (axios-like) when isAxiosError is false
   if (err && typeof err === 'object' && 'response' in err) {
     const r = (err as { response?: { data?: unknown; status?: number } }).response;
     if (r) {
@@ -121,8 +202,8 @@ export function apiErrorMessage(err: unknown, fallback: string): string {
         }
         if (r.status >= 500) {
           const d = normalizeResponseData(r.data);
-          const fromBody = messageFromPayload(d);
-          if (fromBody) return fromBody;
+          const fromBody500 = messageFromPayload(d);
+          if (fromBody500) return fromBody500;
           const rawErr =
             d && typeof d === 'object' && 'error' in d ? trimStr((d as ErrorPayload).error) : null;
           if (rawErr) return rawErr;
@@ -137,4 +218,18 @@ export function apiErrorMessage(err: unknown, fallback: string): string {
   }
 
   return fallback;
+}
+
+/**
+ * Reads GarmentHub API error JSON from axios (or axios-like) failures.
+ * Does not rely solely on `axios.isAxiosError` — duplicate axios copies in the bundle can break that check.
+ *
+ * When `VITE_CLIENT_DEBUG=true`, appends a technical block (see `formatAxiosLikeDebug`).
+ */
+export function apiErrorMessage(err: unknown, fallback: string): string {
+  const user = apiErrorUserMessage(err, fallback);
+  if (!clientDebug) return user;
+  const detail = formatAxiosLikeDebug(err).trim();
+  if (!detail) return user;
+  return `${user}\n\n---\n${detail}`;
 }

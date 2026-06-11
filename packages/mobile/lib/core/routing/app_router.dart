@@ -11,6 +11,7 @@ import '../../features/products/presentation/product_list_screen.dart';
 import '../../features/products/presentation/product_detail_screen.dart';
 import '../../features/products/presentation/trader_gallery_screen.dart';
 import '../../features/curation/presentation/customer_shared_photos_screen.dart';
+import '../../features/orders/domain/bulk_order_draft.dart';
 import '../../features/orders/presentation/bulk_order_screen.dart';
 import '../../features/orders/presentation/orders_list_screen.dart';
 import '../../features/orders/presentation/order_detail_screen.dart';
@@ -30,6 +31,8 @@ import '../../features/vendor/presentation/vendor_upload_screen.dart';
 import '../../features/vendor/presentation/vendor_incoming_orders_screen.dart';
 import '../../features/vendor/presentation/vendor_order_history_screen.dart';
 import '../../features/vendor/presentation/vendor_catalog_screen.dart';
+import '../../features/vendor/presentation/vendor_inbound_share_args.dart';
+import '../../features/vendor/presentation/vendor_inbound_share_screen.dart';
 import '../../features/admin/presentation/admin_dashboard_screen.dart';
 import '../../features/admin/presentation/admin_users_screen.dart';
 import '../../features/admin/presentation/admin_orders_screen.dart';
@@ -97,7 +100,10 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         },
         routes: [
           GoRoute(path: '/', builder: (context, state) => const CustomerHomeScreen()),
-          GoRoute(path: '/search', builder: (context, state) => const ProductListScreen()),
+          GoRoute(
+            path: '/search',
+            builder: (context, state) => ProductListScreen(initialUri: state.uri),
+          ),
           GoRoute(
             path: '/products/:id',
             builder: (context, state) => ProductDetailScreen(productId: state.pathParameters['id']!),
@@ -108,9 +114,23 @@ final goRouterProvider = Provider<GoRouter>((ref) {
           ),
           GoRoute(
             path: '/products/:id/shared-photos',
-            builder: (context, state) => CustomerSharedPhotosScreen(productId: state.pathParameters['id']!),
+            builder: (context, state) {
+              final extra = state.extra;
+              final ctx = extra is ShareOrderContext ? extra : null;
+              return CustomerSharedPhotosScreen(
+                productId: state.pathParameters['id']!,
+                shareOrderContext: ctx,
+              );
+            },
           ),
-          GoRoute(path: '/bulk-order', builder: (context, state) => const BulkOrderScreen()),
+          GoRoute(
+            path: '/bulk-order',
+            builder: (context, state) {
+              final extra = state.extra;
+              final draft = extra is BulkOrderDraft ? extra : null;
+              return BulkOrderScreen(draft: draft);
+            },
+          ),
           GoRoute(path: '/orders', builder: (context, state) => const OrdersListScreen()),
           GoRoute(
             path: '/orders/:id',
@@ -139,6 +159,16 @@ final goRouterProvider = Provider<GoRouter>((ref) {
             builder: (context, state) => ProductFormScreen(productId: state.pathParameters['id']!),
           ),
           GoRoute(path: '/vendor/upload', builder: (context, state) => const VendorUploadScreen()),
+          GoRoute(
+            path: '/vendor/inbound-share',
+            builder: (context, state) {
+              final extra = state.extra;
+              if (extra is! VendorInboundShareArgs) {
+                return const VendorDashboardScreen();
+              }
+              return VendorInboundShareScreen(args: extra);
+            },
+          ),
           GoRoute(path: '/vendor/orders', builder: (context, state) => const VendorIncomingOrdersScreen()),
           GoRoute(path: '/vendor/history', builder: (context, state) => const VendorOrderHistoryScreen()),
           GoRoute(path: '/vendor/catalog', builder: (context, state) => const VendorCatalogScreen()),

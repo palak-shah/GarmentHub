@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Sharing Shortcuts: share-target for image/*.
+  Dynamic shortcuts must use IMAGE_SHARE_TARGET_CATEGORY (ShareTargetsConstants.kt).
+-->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <share-target android:targetClass="com.garmenthub.garmenthub_mobile.MainActivity">
+        <data android:mimeType="image/*" />
+        <category android:name="com.garmenthub.garmenthub_mobile.category.IMAGE_SHARE_TARGET" />
+    </share-target>
+</shortcuts>

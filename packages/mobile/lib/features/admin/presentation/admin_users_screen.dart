@@ -34,7 +34,7 @@ class AdminUsersScreen extends ConsumerWidget {
                     ref.invalidate(adminUsersProvider);
                   } catch (e) {
                     if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(apiErrorMessage(e))));
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(apiErrorMessageVerbose(e))));
                     }
                   }
                 },
@@ -43,7 +43,7 @@ class AdminUsersScreen extends ConsumerWidget {
           ),
         ),
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text(apiErrorMessage(e))),
+        error: (e, _) => Center(child: Text(apiErrorMessageVerbose(e))),
       ),
     );
   }

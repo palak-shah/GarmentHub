@@ -1,12 +1,14 @@
 plugins {
     id("com.android.application")
+    id("org.jetbrains.kotlin.android")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
 
 android {
     namespace = "com.garmenthub.garmenthub_mobile"
-    compileSdk = flutter.compileSdkVersion
+    // file_picker / flutter_plugin_android_lifecycle require compileSdk >= 36 (CheckAarMetadata).
+    compileSdk = maxOf(flutter.compileSdkVersion, 36)
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
@@ -42,4 +44,8 @@ kotlin {
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    implementation("androidx.core:core-ktx:1.15.0")
 }

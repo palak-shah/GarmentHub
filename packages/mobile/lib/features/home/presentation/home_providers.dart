@@ -22,6 +22,7 @@ class CustomerHomeFeedState {
     required this.dateBuckets,
     required this.traderStories,
     required this.productTraderNameByProductId,
+    required this.sharedPhotoCountByProductId,
     this.nextCursor,
     this.loadingMore = false,
   });
@@ -32,6 +33,7 @@ class CustomerHomeFeedState {
   final List<CustomerDateBucket> dateBuckets;
   final List<({String traderId, String traderLabel, List<Product> products})> traderStories;
   final Map<String, String> productTraderNameByProductId;
+  final Map<String, int> sharedPhotoCountByProductId;
   final String? nextCursor;
   final bool loadingMore;
 
@@ -44,6 +46,7 @@ class CustomerHomeFeedState {
     List<CustomerDateBucket>? dateBuckets,
     List<({String traderId, String traderLabel, List<Product> products})>? traderStories,
     Map<String, String>? productTraderNameByProductId,
+    Map<String, int>? sharedPhotoCountByProductId,
     String? nextCursor,
     bool? loadingMore,
   }) {
@@ -54,6 +57,7 @@ class CustomerHomeFeedState {
       dateBuckets: dateBuckets ?? this.dateBuckets,
       traderStories: traderStories ?? this.traderStories,
       productTraderNameByProductId: productTraderNameByProductId ?? this.productTraderNameByProductId,
+      sharedPhotoCountByProductId: sharedPhotoCountByProductId ?? this.sharedPhotoCountByProductId,
       nextCursor: nextCursor ?? this.nextCursor,
       loadingMore: loadingMore ?? this.loadingMore,
     );
@@ -100,6 +104,8 @@ class CustomerHomeFeedNotifier extends AsyncNotifier<CustomerHomeFeedState> {
 
     final buckets = buildCustomerDateBuckets(normalized);
 
+    final sharedPhotoCountByProductId = buildSharedPhotoCountByProductId(normalized);
+
     return CustomerHomeFeedState(
       mergedProducts: merged,
       curatedProductIds: curatedIds,
@@ -107,6 +113,7 @@ class CustomerHomeFeedNotifier extends AsyncNotifier<CustomerHomeFeedState> {
       dateBuckets: buckets,
       traderStories: stories,
       productTraderNameByProductId: traderNameByProduct,
+      sharedPhotoCountByProductId: sharedPhotoCountByProductId,
       nextCursor: next,
       loadingMore: false,
     );

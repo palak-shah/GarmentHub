@@ -1,4 +1,5 @@
 import '../../../shared/models/product.dart';
+import '../../orders/domain/bulk_order_draft.dart';
 
 /// Normalizes curated share payload (lines may be missing).
 Map<String, dynamic> normalizeReceivedShareMap(Map<String, dynamic> share) {
@@ -18,6 +19,45 @@ Map<String, dynamic> normalizeReceivedShareMap(Map<String, dynamic> share) {
     });
   }
   return {...share, 'lines': lines};
+}
+
+/// Counts curated share lines per product (aligned with [buildCustomerDateBuckets]).
+Map<String, int> buildSharedPhotoCountByProductId(List<Map<String, dynamic>> normalizedShares) {
+  final counts = <String, int>{};
+  for (final share in normalizedShares) {
+    final norm = normalizeReceivedShareMap(Map<String, dynamic>.from(share));
+    final lines = norm['lines'] as List? ?? [];
+    for (final line in lines) {
+      if (line is! Map<String, dynamic>) continue;
+      final pm = line['product'];
+      if (pm is! Map<String, dynamic>) continue;
+      final id = pm['id'] as String?;
+      if (id == null) continue;
+      counts[id] = (counts[id] ?? 0) + 1;
+    }
+  }
+  return counts;
+}
+
+/// Latest share that includes this product — for trader / order mode when opening gallery.
+ShareOrderContext? shareOrderContextForProduct(String productId, List<Map<String, dynamic>> normalizedShares) {
+  final sorted = [...normalizedShares]
+    ..sort((a, b) => DateTime.parse(b['createdAt'] as String).compareTo(DateTime.parse(a['createdAt'] as String)));
+  for (final share in sorted) {
+    final norm = normalizeReceivedShareMap(Map<String, dynamic>.from(share));
+    final lines = norm['lines'] as List? ?? [];
+    for (final line in lines) {
+      if (line is! Map<String, dynamic>) continue;
+      final pm = line['product'];
+      if (pm is! Map<String, dynamic>) continue;
+      if (pm['id'] != productId) continue;
+      final trader = share['trader'];
+      final tid = trader is Map ? trader['id']?.toString() : null;
+      final mode = share['orderMode']?.toString() ?? 'DIRECT';
+      return ShareOrderContext(traderId: tid, orderMode: mode);
+    }
+  }
+  return null;
 }
 
 class CustomerTraderRow {

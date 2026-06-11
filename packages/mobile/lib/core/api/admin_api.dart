@@ -37,7 +37,7 @@ class AdminApi {
   Future<Map<String, dynamic>> createCategory(String name, List<Map<String, dynamic>>? attributes) async {
     final res = await _dio.post<Map<String, dynamic>>(
       '/admin/categories',
-      data: {'name': name, if (attributes != null) 'attributes': attributes},
+      data: {'name': name, 'attributes': ?attributes},
     );
     return ApiResponse.unwrapData(res.data!, (d) => d as Map<String, dynamic>);
   }

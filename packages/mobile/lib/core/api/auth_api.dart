@@ -27,7 +27,7 @@ class AuthApi {
       data: {
         'phone': phone,
         'code': code,
-        if (role != null) 'role': role,
+        'role': ?role,
       },
     );
     return ApiResponse.unwrapData(res.data!, (data) {

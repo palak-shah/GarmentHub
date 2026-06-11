@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/network/api_error.dart';
 import '../../../shared/models/product.dart';
+import '../domain/vendor_share_prefs.dart';
 import '../vendor_providers.dart';
 
 class VendorProductListScreen extends ConsumerWidget {
@@ -31,13 +34,22 @@ class VendorProductListScreen extends ConsumerWidget {
                     : Image.network(p.primaryImageUrl, width: 48, height: 48, fit: BoxFit.cover),
                 title: Text(p.name),
                 subtitle: Text(p.statusLabel),
-                onTap: () => context.push('/vendor/products/${p.id}/edit'),
+                onTap: () {
+                  unawaited(
+                    VendorSharePrefs.recordProductUsage(
+                      id: p.id,
+                      name: p.name,
+                      thumbnailUrl: p.primaryImageUrl.isEmpty ? null : p.primaryImageUrl,
+                    ),
+                  );
+                  context.push('/vendor/products/${p.id}/edit');
+                },
               );
             },
           ),
         ),
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text(apiErrorMessage(e))),
+        error: (e, _) => Center(child: Text(apiErrorMessageVerbose(e))),
       ),
     );
   }

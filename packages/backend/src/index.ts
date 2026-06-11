@@ -1,7 +1,8 @@
 import 'express-async-errors';
 import express from 'express';
 import cors from 'cors';
-import { ensureUploadDirs, UPLOADS_ROOT } from './config/uploadPaths';
+
+import { UPLOADS_ROOT, ensureUploadDirs } from './config/uploadPaths';
 import { buildCorsOptions } from './config/corsOptions';
 import { env } from './config/env';
 import { errorHandler } from './middleware/errorHandler';
@@ -18,19 +19,15 @@ import { workflowRoutes } from './routes/workflow.routes';
 import { notificationRoutes } from './routes/notification.routes';
 
 const app = express();
-
 ensureUploadDirs();
-
 app.use(cors(buildCorsOptions()));
 app.use('/uploads', express.static(UPLOADS_ROOT));
 // Multipart uploads must run before express.json() (belt-and-suspenders for body parsing).
 app.use('/api/upload', uploadRoutes);
 app.use(express.json());
-
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
-
 app.use('/api/auth', authRoutes);
 app.use('/api/products', productRoutes);
 app.use('/api/orders', orderRoutes);
@@ -41,20 +38,16 @@ app.use('/api/network', networkRoutes);
 app.use('/api/curation', curationRoutes);
 app.use('/api/workflow', workflowRoutes);
 app.use('/api/notifications', notificationRoutes);
-
 app.use((req, res) => {
   res.status(404).json({
     success: false,
     error: `Not found: ${req.method} ${req.originalUrl}`,
   });
 });
-
 app.use(errorHandler);
-
 const server = app.listen(env.port, () => {
   console.log(`GarmentHub API running on port ${env.port}`);
 });
-
 server.on('error', (err: NodeJS.ErrnoException) => {
   if (err.code === 'EADDRINUSE') {
     console.error(
@@ -67,7 +60,6 @@ server.on('error', (err: NodeJS.ErrnoException) => {
   }
   process.exit(1);
 });
-
 function shutdown() {
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(1), 5000).unref();

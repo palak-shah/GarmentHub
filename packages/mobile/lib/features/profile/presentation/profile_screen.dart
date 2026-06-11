@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/api/api_providers.dart';
 import '../../../core/network/api_error.dart';
+import '../../../core/theme/app_theme.dart';
 
 class ProfileScreen extends ConsumerStatefulWidget {
   const ProfileScreen({super.key});
@@ -17,6 +18,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   late final TextEditingController _business;
   late final TextEditingController _address;
   bool _loading = false;
+
+  static const _fieldRadius = 12.0;
 
   @override
   void initState() {
@@ -48,41 +51,155 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(apiErrorMessage(e))));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(apiErrorMessageVerbose(e))));
       }
     } finally {
       if (mounted) setState(() => _loading = false);
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final u = ref.watch(authSessionProvider).user;
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Profile'),
-        actions: [
-          TextButton(
-            onPressed: () async {
-              await ref.read(authSessionProvider.notifier).logout();
-              if (context.mounted) context.go('/login');
-            },
-            child: const Text('Log out'),
+  InputDecoration _flatFieldDecoration(ColorScheme color) {
+    final none = OutlineInputBorder(
+      borderRadius: BorderRadius.circular(_fieldRadius),
+      borderSide: BorderSide.none,
+    );
+    return InputDecoration(
+      filled: true,
+      fillColor: AppTheme.formFieldFillMuted,
+      border: none,
+      enabledBorder: none,
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(_fieldRadius),
+        borderSide: BorderSide(color: color.primary, width: 1.5),
+      ),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+      isDense: true,
+    );
+  }
+
+  Widget _readOnlyBlock(String label, String value) {
+    final theme = Theme.of(context);
+    final color = theme.colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label.toUpperCase(),
+            style: theme.textTheme.labelSmall?.copyWith(
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.6,
+              color: color.onSurface.withValues(alpha: 0.65),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+            decoration: BoxDecoration(
+              color: AppTheme.formFieldFillMuted,
+              borderRadius: BorderRadius.circular(_fieldRadius),
+            ),
+            child: Text(
+              value,
+              style: theme.textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w700),
+            ),
           ),
         ],
       ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
+    );
+  }
+
+  Widget _editableField(String label, TextEditingController controller) {
+    final theme = Theme.of(context);
+    final color = theme.colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Signed in as ${u?.phone ?? ''} (${u?.role.apiValue ?? ''})'),
-          const SizedBox(height: 16),
-          TextField(controller: _name, decoration: const InputDecoration(labelText: 'Name')),
-          TextField(controller: _business, decoration: const InputDecoration(labelText: 'Business name')),
-          TextField(controller: _address, decoration: const InputDecoration(labelText: 'Address')),
-          const SizedBox(height: 24),
-          FilledButton(
-            onPressed: _loading ? null : _save,
-            child: _loading ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Save'),
+          Text(
+            label.toUpperCase(),
+            style: theme.textTheme.labelSmall?.copyWith(
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.6,
+              color: color.onSurface.withValues(alpha: 0.65),
+            ),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: controller,
+            style: theme.textTheme.bodyLarge,
+            decoration: _flatFieldDecoration(color),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final u = ref.watch(authSessionProvider).user;
+    final theme = Theme.of(context);
+    final color = theme.colorScheme;
+
+    return Scaffold(
+      backgroundColor: color.surface,
+      appBar: AppBar(
+        automaticallyImplyLeading: false,
+        centerTitle: false,
+        titleSpacing: 20,
+        title: Text(
+          'Profile',
+          style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
+        ),
+      ),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
+        children: [
+          _editableField('Name', _name),
+          _editableField('Business name', _business),
+          _editableField('Address', _address),
+          _readOnlyBlock('Phone', u?.phone ?? '—'),
+          _readOnlyBlock('Role', u?.role.apiValue.toLowerCase() ?? '—'),
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            height: 50,
+            child: FilledButton(
+              onPressed: _loading ? null : _save,
+              style: FilledButton.styleFrom(
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              ),
+              child: _loading
+                  ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                  : const Text('Save'),
+            ),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            height: 50,
+            child: FilledButton.tonal(
+              onPressed: () async {
+                await ref.read(authSessionProvider.notifier).logout();
+                if (context.mounted) context.go('/login');
+              },
+              style: FilledButton.styleFrom(
+                backgroundColor: AppTheme.formFieldFillMuted,
+                foregroundColor: const Color(0xFFC62828),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              ),
+              child: const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.logout, size: 20, color: Color(0xFFC62828)),
+                  SizedBox(width: 8),
+                  Text('Log out', style: TextStyle(fontWeight: FontWeight.w600, color: Color(0xFFC62828))),
+                ],
+              ),
+            ),
           ),
         ],
       ),

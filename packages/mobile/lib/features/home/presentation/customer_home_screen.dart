@@ -86,7 +86,7 @@ class _CustomerHomeScaffoldState extends ConsumerState<_CustomerHomeScaffold> {
                 error: (e, _) => Center(
                   child: Padding(
                     padding: const EdgeInsets.all(24),
-                    child: Text(apiErrorMessage(e), textAlign: TextAlign.center),
+                    child: Text(apiErrorMessageVerbose(e), textAlign: TextAlign.center),
                   ),
                 ),
                 data: (state) => _CustomerHomeScrollBody(
@@ -226,6 +226,21 @@ class _CustomerHomeScrollBody extends ConsumerStatefulWidget {
 
 class _CustomerHomeScrollBodyState extends ConsumerState<_CustomerHomeScrollBody> {
   String? _activeStoryTraderId;
+
+  int? _sharedCount(CustomerHomeFeedState state, String productId) {
+    final n = state.sharedPhotoCountByProductId[productId] ?? 0;
+    return n > 0 ? n : null;
+  }
+
+  void _openCustomerProduct(BuildContext context, Product p, CustomerHomeFeedState state) {
+    final n = state.sharedPhotoCountByProductId[p.id] ?? 0;
+    if (n > 0) {
+      final ctx = shareOrderContextForProduct(p.id, state.normalizedShares);
+      context.push('/products/${p.id}/shared-photos', extra: ctx);
+    } else {
+      context.push('/products/${p.id}');
+    }
+  }
 
   List<Product> _filterBySearch(List<Product> list, String q) {
     final s = q.toLowerCase().trim();
@@ -370,16 +385,6 @@ class _CustomerHomeScrollBodyState extends ConsumerState<_CustomerHomeScrollBody
   }
 
   List<Widget> _sliverBucketed(BuildContext context, CustomerHomeFeedState state, String? categoryId) {
-    final extras = <String, int>{};
-    for (final day in state.dateBuckets) {
-      for (final tb in day.traders) {
-        for (final row in tb.rows) {
-          if (categoryId != null && row.product.categoryId != categoryId) continue;
-          extras[row.product.id] = row.photoCount;
-        }
-      }
-    }
-
     final slivers = <Widget>[];
     for (final day in state.dateBuckets) {
       slivers.add(
@@ -419,7 +424,7 @@ class _CustomerHomeScrollBodyState extends ConsumerState<_CustomerHomeScrollBody
             ),
           ),
         );
-        slivers.add(_sliverProductGridForRows(context, rows, extras, state));
+        slivers.add(_sliverProductGridForRows(context, rows, state));
       }
     }
     return slivers;
@@ -428,7 +433,6 @@ class _CustomerHomeScrollBodyState extends ConsumerState<_CustomerHomeScrollBody
   Widget _sliverProductGridForRows(
     BuildContext context,
     List<CustomerTraderRow> rows,
-    Map<String, int> photoExtras,
     CustomerHomeFeedState state,
   ) {
     final products = rows.map((r) => r.product).toList();
@@ -444,12 +448,11 @@ class _CustomerHomeScrollBodyState extends ConsumerState<_CustomerHomeScrollBody
         delegate: SliverChildBuilderDelegate(
           (context, i) {
             final p = products[i];
-            final n = photoExtras[p.id] ?? 1;
             return HomeProductCard(
               product: p,
               sharedBy: state.productTraderNameByProductId[p.id],
-              photoCount: n > 1 ? n : null,
-              onTap: () => context.push('/products/${p.id}'),
+              photoCount: _sharedCount(state, p.id),
+              onTap: () => _openCustomerProduct(context, p, state),
             );
           },
           childCount: products.length,
@@ -480,7 +483,8 @@ class _CustomerHomeScrollBodyState extends ConsumerState<_CustomerHomeScrollBody
             return HomeProductCard(
               product: p,
               sharedBy: state.productTraderNameByProductId[p.id],
-              onTap: () => context.push('/products/${p.id}'),
+              photoCount: _sharedCount(state, p.id),
+              onTap: () => _openCustomerProduct(context, p, state),
             );
           },
           childCount: products.length,
@@ -664,7 +668,7 @@ class _TraderHomeScaffoldState extends ConsumerState<_TraderHomeScaffold> {
     if (tab == TraderWorkflowTab.neW) {
       return newFeed.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text(apiErrorMessage(e))),
+        error: (e, _) => Center(child: Text(apiErrorMessageVerbose(e))),
         data: (data) {
           if (data == null) return const SizedBox.shrink();
           if (data.isGrouped && data.groupedRaw != null) {
@@ -741,7 +745,7 @@ class _TraderHomeScaffoldState extends ConsumerState<_TraderHomeScaffold> {
 
     return wfFeed.when(
       loading: () => const Center(child: CircularProgressIndicator()),
-      error: (e, _) => Center(child: Text(apiErrorMessage(e))),
+      error: (e, _) => Center(child: Text(apiErrorMessageVerbose(e))),
       data: (map) {
         if (map == null) return const SizedBox.shrink();
         final raw = map['products'] as List?;

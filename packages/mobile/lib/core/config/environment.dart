@@ -8,6 +8,14 @@ class Environment {
 
   static const String _define = String.fromEnvironment('API_BASE_URL');
 
+  /// Web app origin for invite links (`/login?invite=…`), e.g. `https://app.example.com`.
+  /// `--dart-define=WEB_APP_URL=https://app.example.com`
+  static String get webAppBaseUrl {
+    const w = String.fromEnvironment('WEB_APP_URL');
+    if (w.isNotEmpty) return w.replaceAll(RegExp(r'/$'), '');
+    return '';
+  }
+
   /// Android emulator → host loopback; iOS simulator can use localhost via define.
   static String get apiBaseUrl {
     if (_define.isNotEmpty) {

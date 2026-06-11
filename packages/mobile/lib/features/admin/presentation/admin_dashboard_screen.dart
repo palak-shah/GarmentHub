@@ -24,7 +24,7 @@ class AdminDashboardScreen extends ConsumerWidget {
           ],
         ),
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text(apiErrorMessage(e))),
+        error: (e, _) => Center(child: Text(apiErrorMessageVerbose(e))),
       ),
     );
   }

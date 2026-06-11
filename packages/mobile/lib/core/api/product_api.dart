@@ -70,9 +70,9 @@ class ProductApi {
     final res = await _dio.get<Map<String, dynamic>>(
       '/products/feed',
       queryParameters: {
-        'cursor': ?cursor,
-        'limit': ?limit,
-        'categoryId': ?categoryId,
+        if (cursor != null) 'cursor': cursor,
+        if (limit != null) 'limit': limit,
+        if (categoryId != null) 'categoryId': categoryId,
       },
     );
     return ApiResponse.unwrapData(res.data!, (d) => d as Map<String, dynamic>);

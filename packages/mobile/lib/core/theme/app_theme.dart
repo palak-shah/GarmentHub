@@ -4,15 +4,6 @@ class AppTheme {
   /// Align with production PWA primary (indigo/purple family).
   static const Color brandSeed = Color(0xFF5D5FEF);
 
-  /// Soft page background (vendor mocks, form screens). Prefer over ad-hoc hex literals.
-  static const Color pageBackgroundSoft = Color(0xFFF5F5FA);
-
-  /// Muted filled field background for dense forms (e.g. edit product listing details).
-  static const Color formFieldFillMuted = Color(0xFFE8E8EE);
-
-  /// Vendor list cards (incoming orders, brands, catalog) — matches UI mocks.
-  static const Color vendorCardBackground = Color(0xFFF7F7FD);
-
   static ThemeData light() {
     final scheme = ColorScheme.fromSeed(seedColor: brandSeed);
     return ThemeData(

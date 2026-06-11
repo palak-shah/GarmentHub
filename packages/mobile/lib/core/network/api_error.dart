@@ -1,11 +1,19 @@
-import 'package:dio/dio.dart';
+import 'dart:convert';
 
-import '../config/client_debug.dart';
+import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+
+import '../config/environment.dart';
 import 'api_response.dart';
 
 String? _trimStr(Object? v) {
   if (v is String && v.trim().isNotEmpty) return v.trim();
   return null;
+}
+
+String _truncateDebug(String s, [int max = 2000]) {
+  if (s.length <= max) return s;
+  return '${s.substring(0, max)}… [truncated, ${s.length} chars]';
 }
 
 String? _messageFromPayload(dynamic data) {
@@ -35,11 +43,22 @@ String? _messageFromPayload(dynamic data) {
   return null;
 }
 
-String apiErrorMessage(Object err, [String fallback = 'Something went wrong']) {
+String _apiErrorUserMessage(Object err, [String fallback = 'Something went wrong']) {
   if (err is DioException) {
     if (err.type == DioExceptionType.connectionError ||
         err.type == DioExceptionType.connectionTimeout) {
       return 'No response from server — is the API running and reachable?';
+    }
+    if (kIsWeb &&
+        err.response == null &&
+        (err.type == DioExceptionType.unknown || err.type == DioExceptionType.cancel)) {
+      final path = err.requestOptions.path;
+      if (path.contains('upload')) {
+        return 'Upload failed in the browser (often CORS). Add this app\'s exact URL '
+            '(scheme + host + port, e.g. http://YOUR_IP:8080) to API CORS_ORIGINS, '
+            'or set CORS_ALLOW_LAN_ORIGINS=1 on the API if you use a private LAN URL. '
+            'Hard-refresh after changing CORS.';
+      }
     }
     if (err.response == null && err.requestOptions.path.isNotEmpty) {
       return 'Network error — check your connection';
@@ -80,58 +99,69 @@ String apiErrorMessage(Object err, [String fallback = 'Something went wrong']) {
   return fallback;
 }
 
-const _verboseMaxChars = 2000;
-
-String _truncateVerbose(String s) {
-  if (s.length <= _verboseMaxChars) return s;
-  return '${s.substring(0, _verboseMaxChars)}\n[truncated…]';
-}
-
-String _redactAuthInString(String s) {
-  return s.replaceAllMapped(
-    RegExp(r'authorization\s*:\s*bearer\s+\S+', caseSensitive: false),
-    (_) => 'Authorization: Bearer [redacted]',
-  );
-}
-
-String? _bodyPreviewForVerbose(dynamic data) {
-  if (data == null) return null;
-  String raw;
-  if (data is String) {
-    raw = data;
-  } else {
-    raw = data.toString();
-  }
-  raw = _redactAuthInString(raw).trim();
-  if (raw.isEmpty) return null;
-  return _truncateVerbose(raw);
-}
-
-String? _verboseTail(Object err) {
-  if (err is DioException) {
-    final parts = <String>['DioException: ${err.type}'];
-    final ro = err.requestOptions;
-    if (ro.path.isNotEmpty) {
-      parts.add('${ro.method} ${ro.uri}');
+String _stringifyResponseData(dynamic data) {
+  if (data == null) return '(null)';
+  if (data is String) return data;
+  if (data is Map || data is List) {
+    try {
+      return jsonEncode(data);
+    } catch (_) {
+      return data.toString();
     }
-    final sc = err.response?.statusCode;
-    if (sc != null) parts.add('status: $sc');
-    final preview = _bodyPreviewForVerbose(err.response?.data);
-    if (preview != null) parts.add('body:\n$preview');
-    return parts.join('\n');
+  }
+  return data.toString();
+}
+
+Map<String, dynamic> _headersForDebug(Map<String, dynamic>? headers) {
+  if (headers == null || headers.isEmpty) return {};
+  final out = <String, dynamic>{};
+  headers.forEach((name, value) {
+    final lower = name.toLowerCase();
+    if (lower == 'authorization' || lower == 'cookie') {
+      out[name] = '<redacted>';
+    } else {
+      out[name] = value;
+    }
+  });
+  return out;
+}
+
+/// Technical details for developers when [Environment.clientDebug] is true.
+String formatApiErrorDebug(Object err) {
+  final buf = StringBuffer();
+  if (err is DioException) {
+    buf.writeln('DioException');
+    buf.writeln('type: ${err.type}');
+    if (err.message != null && err.message!.isNotEmpty) {
+      buf.writeln('message: ${err.message}');
+    }
+    buf.writeln('method: ${err.requestOptions.method}');
+    buf.writeln('uri: ${err.requestOptions.uri}');
+    buf.writeln('headers: ${_stringifyResponseData(_headersForDebug(err.requestOptions.headers))}');
+    buf.writeln('statusCode: ${err.response?.statusCode}');
+    buf.writeln('responseType: ${err.response?.requestOptions.responseType}');
+    final body = _stringifyResponseData(err.response?.data);
+    buf.writeln('response.data: ${_truncateDebug(body)}');
+    buf.writeln('stackTrace: ${err.stackTrace}');
+    return buf.toString().trimRight();
   }
   if (err is ApiEnvelopeException) {
-    return 'ApiEnvelopeException: ${err.message}';
+    buf.writeln('ApiEnvelopeException');
+    buf.writeln('message: ${err.message}');
+    return buf.toString().trimRight();
   }
-  return err.toString();
+  buf.writeln(err.runtimeType.toString());
+  buf.writeln(_truncateDebug(err.toString(), 4000));
+  if (err is Error && err.stackTrace != null) {
+    buf.writeln('stackTrace: ${err.stackTrace}');
+  }
+  return buf.toString().trimRight();
 }
 
-/// Same as [apiErrorMessage] for end users; when `CLIENT_DEBUG=true`, appends
-/// Dio type, status, and a truncated response preview (Authorization redacted).
-String apiErrorMessageVerbose(Object err, [String fallback = 'Something went wrong']) {
-  final base = apiErrorMessage(err, fallback);
-  if (!kClientDebug) return base;
-  final tail = _verboseTail(err);
-  if (tail == null || tail.trim().isEmpty) return base;
-  return '$base\n\n${_truncateVerbose(tail.trim())}';
+String apiErrorMessage(Object err, [String fallback = 'Something went wrong']) {
+  final user = _apiErrorUserMessage(err, fallback);
+  if (!Environment.clientDebug) return user;
+  final detail = formatApiErrorDebug(err);
+  if (detail.isEmpty) return user;
+  return '$user\n\n---\n$detail';
 }

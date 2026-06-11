@@ -1,15 +1,13 @@
-import 'dart:async';
-import 'dart:math' as math;
+import 'dart:math' show min;
 
 import 'package:file_picker/file_picker.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../core/api/api_providers.dart';
-import '../../../core/api/upload_multipart_helpers.dart';
 import '../../../core/network/api_error.dart';
-import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/platform_file_upload.dart';
 import '../../../shared/models/product.dart';
 import '../domain/vendor_share_prefs.dart';
 import '../vendor_providers.dart';
@@ -22,37 +20,18 @@ class VendorUploadScreen extends ConsumerStatefulWidget {
 }
 
 class _VendorUploadScreenState extends ConsumerState<VendorUploadScreen> {
-  String? _selectedProductId;
-  String? _selectedProductName;
-  /// Set from Advanced → Enter product ID (overrides listing row until cleared).
-  String? _advancedManualId;
   bool _loading = false;
+  Product? _selectedProduct;
 
-  String? _effectiveProductId() {
-    final m = _advancedManualId?.trim();
-    if (m != null && m.isNotEmpty) return m;
-    final id = _selectedProductId;
-    if (id == null || id.isEmpty) return null;
-    return id;
-  }
-
-  bool get _canUpload => _effectiveProductId() != null && _effectiveProductId()!.isNotEmpty;
-
-  String get _listingSubtitle {
-    if (_advancedManualId != null && _advancedManualId!.trim().isNotEmpty) {
-      return 'Product ID';
-    }
-    return 'Product';
-  }
-
-  String get _listingTitle {
-    if (_advancedManualId != null && _advancedManualId!.trim().isNotEmpty) {
-      return _advancedManualId!.trim();
-    }
-    if (_selectedProductName != null && _selectedProductName!.isNotEmpty) {
-      return _selectedProductName!;
-    }
-    return 'Select a product';
+  InputDecoration _searchDeco(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return InputDecoration(
+      filled: true,
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      fillColor: scheme.surfaceContainerHighest,
+      hintText: 'Search by name',
+    );
   }
 
   Future<void> _openProductPicker(List<Product> products) async {
@@ -60,402 +39,373 @@ class _VendorUploadScreenState extends ConsumerState<VendorUploadScreen> {
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
-      backgroundColor: Theme.of(context).colorScheme.surface,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) => _ProductPickerSheet(products: products),
-    );
-    if (!mounted || picked == null) return;
-    setState(() {
-      _selectedProductId = picked.id;
-      _selectedProductName = picked.name;
-      _advancedManualId = null;
-    });
-  }
-
-  Future<void> _showAdvancedManualIdDialog() async {
-    final ctrl = TextEditingController(text: _advancedManualId ?? '');
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Enter product ID'),
-        content: TextField(
-          controller: ctrl,
-          decoration: const InputDecoration(
-            hintText: 'Product ID',
-            border: OutlineInputBorder(),
+      builder: (sheetContext) {
+        final scheme = Theme.of(sheetContext).colorScheme;
+        final text = Theme.of(sheetContext).textTheme;
+        return SafeArea(
+          child: SizedBox(
+            height: MediaQuery.sizeOf(sheetContext).height * 0.65,
+            child: _ProductPickerBody(
+              products: products,
+              scheme: scheme,
+              text: text,
+              searchDecoration: _searchDeco(sheetContext),
+              onSelect: (p) => Navigator.of(sheetContext).pop(p),
+            ),
           ),
-          autofocus: true,
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Apply')),
-        ],
-      ),
+        );
+      },
     );
-    if (!mounted || ok != true) return;
-    final id = ctrl.text.trim();
-    ctrl.dispose();
-    setState(() {
-      if (id.isEmpty) {
-        _advancedManualId = null;
-      } else {
-        _advancedManualId = id;
-        _selectedProductId = null;
-        _selectedProductName = null;
-      }
-    });
-  }
-
-  void _clearAdvancedManual() {
-    setState(() => _advancedManualId = null);
+    if (!mounted) return;
+    if (picked != null) {
+      setState(() => _selectedProduct = picked);
+      await VendorSharePrefs.setLastProduct(id: picked.id, name: picked.name);
+    }
   }
 
   Future<void> _pickAndUpload() async {
-    final pid = _effectiveProductId();
-    if (pid == null || pid.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Select a listing or use Advanced → Enter product ID.')),
-      );
+    final product = _selectedProduct;
+    if (product == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Select a product first')),
+        );
+      }
       return;
     }
     final result = await FilePicker.platform.pickFiles(
       allowMultiple: true,
       type: FileType.image,
-      withData: kIsWeb,
+      withData: true,
     );
     if (result == null || result.files.isEmpty) return;
-    final parts = await platformFilesToMultipart(result.files);
-    if (parts.isEmpty) {
+    final files = result.files.where(platformFileHasUploadableData).toList();
+    if (files.isEmpty) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not read image data. Try again or use another browser.')),
+          const SnackBar(content: Text('Could not read selected images. Try again or pick smaller files.')),
         );
       }
       return;
     }
     setState(() => _loading = true);
     try {
-      await ref.read(uploadApiProvider).postProductImageParts(parts, productId: pid);
-      final list = ref.read(vendorProductsProvider).valueOrNull;
-      var name = 'Listing';
-      if (list != null) {
-        for (final p in list) {
-          if (p.id == pid) {
-            name = p.name;
-            break;
-          }
-        }
+      const chunkSize = 4;
+      for (var i = 0; i < files.length; i += chunkSize) {
+        final chunk = files.sublist(i, min(i + chunkSize, files.length));
+        await ref.read(uploadApiProvider).postProductImagesFromPlatformFiles(chunk, productId: product.id);
       }
-      await VendorSharePrefs.recordProductUsage(id: pid, name: name);
       ref.invalidate(vendorProductsProvider);
+      await VendorSharePrefs.setLastProduct(id: product.id, name: product.name);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Upload complete')));
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(apiErrorMessageVerbose(e))));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(apiErrorMessage(e))));
       }
     } finally {
       if (mounted) setState(() => _loading = false);
     }
   }
 
+  Widget _productSelectTile({
+    required BuildContext context,
+    required ColorScheme scheme,
+    required TextTheme text,
+    required VoidCallback onTap,
+    required bool catalogReady,
+  }) {
+    final p = _selectedProduct;
+    return Material(
+      color: scheme.surfaceContainerHighest,
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        onTap: catalogReady ? onTap : null,
+        borderRadius: BorderRadius.circular(16),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: SizedBox(
+                  width: 48,
+                  height: 48,
+                  child: p != null && p.primaryImageUrl.isNotEmpty
+                      ? Image.network(p.primaryImageUrl, fit: BoxFit.cover)
+                      : ColoredBox(
+                          color: scheme.surfaceContainerLow,
+                          child: Icon(Icons.inventory_2_outlined, color: scheme.onSurfaceVariant, size: 22),
+                        ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Product',
+                      style: text.labelMedium?.copyWith(color: scheme.onSurfaceVariant),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      p?.name ?? 'Select a product',
+                      style: text.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w600,
+                        color: p == null ? scheme.onSurfaceVariant : null,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              Icon(Icons.keyboard_arrow_down_rounded, color: scheme.onSurfaceVariant),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final color = theme.colorScheme;
-    final async = ref.watch(vendorProductsProvider);
+    final scheme = Theme.of(context).colorScheme;
+    final text = Theme.of(context).textTheme;
+    final asyncProducts = ref.watch(vendorProductsProvider);
+
+    final catalogReady = asyncProducts.maybeWhen(data: (list) => list.isNotEmpty, orElse: () => false);
+    final canUpload = _selectedProduct != null && !_loading && catalogReady;
+
     return Scaffold(
-      backgroundColor: color.surface,
-      appBar: AppBar(
-        title: const Text('Upload images'),
-        actions: [
-          PopupMenuButton<String>(
-            onSelected: (v) {
-              if (v == 'manual') {
-                unawaited(_showAdvancedManualIdDialog());
-              } else if (v == 'clear_manual') {
-                _clearAdvancedManual();
-              }
-            },
-            itemBuilder: (ctx) => [
-              const PopupMenuItem(value: 'manual', child: Text('Enter product ID…')),
-              if (_advancedManualId != null && _advancedManualId!.trim().isNotEmpty)
-                const PopupMenuItem(value: 'clear_manual', child: Text('Clear manual ID')),
-            ],
+      appBar: AppBar(title: const Text('Upload images')),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+        children: [
+          Card(
+            elevation: 0,
+            color: scheme.surfaceContainerLow,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.cloud_upload_outlined, color: scheme.primary, size: 28),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          'Add photos to your catalog',
+                          style: text.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'Choose which listing should receive the new images, then pick files from your gallery.',
+                    style: text.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
+                  ),
+                  const SizedBox(height: 20),
+                  asyncProducts.when(
+                    loading: () => const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 24),
+                      child: Center(child: CircularProgressIndicator()),
+                    ),
+                    error: (e, _) => Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(apiErrorMessage(e), style: text.bodyMedium?.copyWith(color: scheme.error)),
+                        const SizedBox(height: 8),
+                        TextButton(
+                          onPressed: () => ref.invalidate(vendorProductsProvider),
+                          child: const Text('Retry'),
+                        ),
+                      ],
+                    ),
+                    data: (list) {
+                      if (list.isEmpty) {
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Text(
+                              'Create a product first, then you can attach photos here.',
+                              style: text.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
+                            ),
+                            const SizedBox(height: 12),
+                            FilledButton.tonal(
+                              onPressed: () => context.push('/vendor/products/new'),
+                              child: const Text('Create a product'),
+                            ),
+                          ],
+                        );
+                      }
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Text(
+                            'Listing',
+                            style: text.labelLarge?.copyWith(fontWeight: FontWeight.w600),
+                          ),
+                          const SizedBox(height: 8),
+                          _productSelectTile(
+                            context: context,
+                            scheme: scheme,
+                            text: text,
+                            catalogReady: true,
+                            onTap: () => _openProductPicker(list),
+                          ),
+                        ],
+                      );
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 24),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              minimumSize: const Size.fromHeight(52),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            ),
+            onPressed: canUpload ? _pickAndUpload : null,
+            child: _loading
+                ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2))
+                : const Text('Pick images & upload'),
           ),
         ],
       ),
-      body: async.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Padding(padding: const EdgeInsets.all(16), child: Text(apiErrorMessageVerbose(e)))),
-        data: (list) {
-          return LayoutBuilder(
-            builder: (context, constraints) {
-              final maxW = math.min(520.0, constraints.maxWidth);
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Expanded(
-                    child: SingleChildScrollView(
-                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-                      child: Center(
-                        child: ConstrainedBox(
-                          constraints: BoxConstraints(maxWidth: maxW),
-                          child: Card(
-                            elevation: 0,
-                            color: AppTheme.vendorCardBackground,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(20),
-                              side: BorderSide(color: color.outlineVariant.withValues(alpha: 0.4)),
-                            ),
-                            child: Padding(
-                              padding: const EdgeInsets.all(22),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Icon(Icons.cloud_upload_outlined, size: 44, color: color.primary),
-                                  const SizedBox(height: 14),
-                                  Text(
-                                    'Add photos to your catalog',
-                                    style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
-                                  ),
-                                  const SizedBox(height: 10),
-                                  Text(
-                                    'Choose which listing should receive the new images, then pick files from your gallery.',
-                                    style: theme.textTheme.bodyMedium?.copyWith(
-                                      color: color.onSurfaceVariant,
-                                      height: 1.35,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 22),
-                                  Text(
-                                    'Listing',
-                                    style: theme.textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w600),
-                                  ),
-                                  const SizedBox(height: 8),
-                                  Material(
-                                    color: color.surface,
-                                    borderRadius: BorderRadius.circular(14),
-                                    child: InkWell(
-                                      borderRadius: BorderRadius.circular(14),
-                                      onTap: _loading
-                                          ? null
-                                          : () {
-                                              if (list.isEmpty) {
-                                                ScaffoldMessenger.of(context).showSnackBar(
-                                                  const SnackBar(
-                                                    content: Text(
-                                                      'No products yet. Create one first or use Advanced → Enter product ID.',
-                                                    ),
-                                                  ),
-                                                );
-                                                return;
-                                              }
-                                              unawaited(_openProductPicker(list));
-                                            },
-                                      child: Ink(
-                                        decoration: BoxDecoration(
-                                          borderRadius: BorderRadius.circular(14),
-                                          border: Border.all(color: color.outlineVariant),
-                                        ),
-                                        child: Padding(
-                                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
-                                          child: Row(
-                                            children: [
-                                              Icon(Icons.inventory_2_outlined, color: color.onSurfaceVariant),
-                                              const SizedBox(width: 12),
-                                              Expanded(
-                                                child: Column(
-                                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                                  children: [
-                                                    Text(
-                                                      _listingSubtitle,
-                                                      style: theme.textTheme.labelSmall?.copyWith(
-                                                        color: color.onSurfaceVariant,
-                                                      ),
-                                                    ),
-                                                    const SizedBox(height: 2),
-                                                    Text(
-                                                      _listingTitle,
-                                                      style: theme.textTheme.titleSmall?.copyWith(
-                                                        fontWeight: FontWeight.w600,
-                                                      ),
-                                                    ),
-                                                  ],
-                                                ),
-                                              ),
-                                              Icon(Icons.keyboard_arrow_down_rounded, color: color.onSurfaceVariant),
-                                            ],
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                  SafeArea(
-                    minimum: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                    child: Center(
-                      child: ConstrainedBox(
-                        constraints: BoxConstraints(maxWidth: maxW),
-                        child: SizedBox(
-                          width: double.infinity,
-                          height: 50,
-                          child: FilledButton(
-                            onPressed: (_loading || !_canUpload) ? null : _pickAndUpload,
-                            style: FilledButton.styleFrom(
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                              disabledBackgroundColor: color.surfaceContainerHighest,
-                              disabledForegroundColor: color.onSurfaceVariant.withValues(alpha: 0.65),
-                            ),
-                            child: _loading
-                                ? const SizedBox(
-                                    width: 22,
-                                    height: 22,
-                                    child: CircularProgressIndicator(strokeWidth: 2),
-                                  )
-                                : const Text('Pick images & upload'),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              );
-            },
-          );
-        },
-      ),
     );
   }
 }
 
-class _ProductPickerSheet extends StatefulWidget {
-  const _ProductPickerSheet({required this.products});
+/// Search field + list; own [State] so the list filters on each keystroke.
+class _ProductPickerBody extends StatefulWidget {
+  const _ProductPickerBody({
+    required this.products,
+    required this.scheme,
+    required this.text,
+    required this.searchDecoration,
+    required this.onSelect,
+  });
 
   final List<Product> products;
+  final ColorScheme scheme;
+  final TextTheme text;
+  final InputDecoration searchDecoration;
+  final ValueChanged<Product> onSelect;
 
   @override
-  State<_ProductPickerSheet> createState() => _ProductPickerSheetState();
+  State<_ProductPickerBody> createState() => _ProductPickerBodyState();
 }
 
-class _ProductPickerSheetState extends State<_ProductPickerSheet> {
-  final _search = TextEditingController();
+class _ProductPickerBodyState extends State<_ProductPickerBody> {
+  final TextEditingController _q = TextEditingController();
 
   @override
   void dispose() {
-    _search.dispose();
+    _q.dispose();
     super.dispose();
-  }
-
-  List<Product> get _filtered {
-    final q = _search.text.trim().toLowerCase();
-    if (q.isEmpty) return widget.products;
-    return widget.products.where((p) => p.name.toLowerCase().contains(q)).toList();
   }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final color = theme.colorScheme;
-    final bottom = MediaQuery.paddingOf(context).bottom;
-    return DraggableScrollableSheet(
-      expand: false,
-      initialChildSize: 0.65,
-      minChildSize: 0.35,
-      maxChildSize: 0.92,
-      builder: (ctx, scrollCtrl) {
-        return Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-              child: TextField(
-                controller: _search,
-                decoration: InputDecoration(
-                  hintText: 'Search by name',
-                  filled: true,
-                  fillColor: color.surfaceContainerHighest,
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-                  prefixIcon: const Icon(Icons.search),
-                ),
-                onChanged: (_) => setState(() {}),
-              ),
-            ),
-            Expanded(
-              child: _filtered.isEmpty
-                  ? Center(
-                      child: Padding(
-                        padding: const EdgeInsets.all(24),
-                        child: Text(
-                          'No listings match your search.',
-                          style: theme.textTheme.bodyLarge?.copyWith(color: color.onSurfaceVariant),
-                          textAlign: TextAlign.center,
+    final q = _q.text.trim().toLowerCase();
+    final filtered = q.isEmpty
+        ? widget.products
+        : widget.products.where((p) => p.name.toLowerCase().contains(q)).toList();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+          child: TextField(
+            controller: _q,
+            decoration: widget.searchDecoration,
+            onChanged: (_) => setState(() {}),
+          ),
+        ),
+        Expanded(
+          child: filtered.isEmpty
+              ? Center(
+                  child: Text(
+                    'No matches',
+                    style: widget.text.bodyMedium?.copyWith(color: widget.scheme.onSurfaceVariant),
+                  ),
+                )
+              : ListView.separated(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                  itemCount: filtered.length,
+                  separatorBuilder: (_, _) => const SizedBox(height: 8),
+                  itemBuilder: (context, i) {
+                    final p = filtered[i];
+                    final status = p.raw['status']?.toString() ?? '';
+                    return Material(
+                      color: widget.scheme.surfaceContainerLow,
+                      borderRadius: BorderRadius.circular(14),
+                      child: InkWell(
+                        onTap: () => widget.onSelect(p),
+                        borderRadius: BorderRadius.circular(14),
+                        child: Padding(
+                          padding: const EdgeInsets.all(12),
+                          child: Row(
+                            children: [
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(10),
+                                child: SizedBox(
+                                  width: 48,
+                                  height: 48,
+                                  child: p.primaryImageUrl.isEmpty
+                                      ? ColoredBox(
+                                          color: widget.scheme.surfaceContainerHighest,
+                                          child: Icon(
+                                            Icons.image_outlined,
+                                            color: widget.scheme.onSurfaceVariant,
+                                          ),
+                                        )
+                                      : Image.network(p.primaryImageUrl, fit: BoxFit.cover),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      p.name,
+                                      style: widget.text.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    if (status.isNotEmpty) ...[
+                                      const SizedBox(height: 4),
+                                      Chip(
+                                        label: Text(status, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
+                                        visualDensity: VisualDensity.compact,
+                                        padding: EdgeInsets.zero,
+                                        backgroundColor: widget.scheme.secondaryContainer,
+                                        side: BorderSide.none,
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                              ),
+                              Icon(Icons.chevron_right_rounded, color: widget.scheme.onSurfaceVariant),
+                            ],
+                          ),
                         ),
                       ),
-                    )
-                  : ListView.separated(
-                      controller: scrollCtrl,
-                      padding: EdgeInsets.only(left: 12, right: 12, bottom: 12 + bottom),
-                      itemCount: _filtered.length,
-                      separatorBuilder: (_, _) => const SizedBox(height: 8),
-                      itemBuilder: (ctx, i) {
-                        final p = _filtered[i];
-                        final status = _statusLabel(p);
-                        return Material(
-                          color: color.surface,
-                          borderRadius: BorderRadius.circular(14),
-                          child: ListTile(
-                            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                            leading: ClipRRect(
-                              borderRadius: BorderRadius.circular(12),
-                              child: p.primaryImageUrl.isEmpty
-                                  ? Container(
-                                      width: 56,
-                                      height: 56,
-                                      color: color.surfaceContainerHighest,
-                                      child: Icon(Icons.image_outlined, color: color.onSurfaceVariant),
-                                    )
-                                  : Image.network(p.primaryImageUrl, width: 56, height: 56, fit: BoxFit.cover),
-                            ),
-                            title: Text(
-                              p.name,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
-                            ),
-                            subtitle: Padding(
-                              padding: const EdgeInsets.only(top: 8),
-                              child: Chip(
-                                label: Text(status.isEmpty ? 'ACTIVE' : status, style: theme.textTheme.labelSmall),
-                                visualDensity: VisualDensity.compact,
-                                padding: EdgeInsets.zero,
-                                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                side: BorderSide.none,
-                                backgroundColor: color.primaryContainer.withValues(alpha: 0.55),
-                              ),
-                            ),
-                            trailing: Icon(Icons.chevron_right, color: color.onSurfaceVariant),
-                            onTap: () => Navigator.pop(context, p),
-                          ),
-                        );
-                      },
-                    ),
-            ),
-          ],
-        );
-      },
+                    );
+                  },
+                ),
+        ),
+      ],
     );
   }
 }
-
-String _statusLabel(Product p) => (p.raw['status']?.toString() ?? 'ACTIVE').toUpperCase();

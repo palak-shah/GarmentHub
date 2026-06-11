@@ -39,9 +39,28 @@ class Product {
   String? get updatedAt => raw['updatedAt'] as String?;
 
   String get primaryImageUrl {
-    if (images.isEmpty) return '';
-    return Environment.resolveMediaUrl(images.first);
+    final urls = carouselMediaUrls;
+    if (urls.isEmpty) return '';
+    return Environment.resolveMediaUrl(urls.first);
   }
+
+  /// Ordered URLs for UI carousel: prefers API `imageAssets`, then legacy `images`.
+  List<String> get carouselMediaUrls {
+    final assets = raw['imageAssets'] ?? raw['image_assets'];
+    if (assets is List && assets.isNotEmpty) {
+      final out = <String>[];
+      for (final e in assets) {
+        if (e is! Map) continue;
+        final m = Map<String, dynamic>.from(e);
+        final u = m['url']?.toString().trim();
+        if (u != null && u.isNotEmpty) out.add(u);
+      }
+      if (out.isNotEmpty) return out;
+    }
+    return List<String>.from(images);
+  }
+
+  int get mediaCount => carouselMediaUrls.length;
 
   factory Product.fromJson(Map<String, dynamic> json) {
     final imgs = <String>[];

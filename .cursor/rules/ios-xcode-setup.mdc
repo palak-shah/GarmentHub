@@ -1,0 +1,15 @@
+---
+description: GarmentHub iOS — Xcode signing, App Groups, Siri for share intents / share extension
+globs: packages/mobile/ios/**/*
+alwaysApply: false
+---
+
+# iOS native setup (GarmentHub)
+
+When changing **Runner**, **GarmentHubShareExtension**, entitlements, or share-handoff code:
+
+1. Open **`packages/mobile/ios/Runner.xcworkspace`**.
+2. **Runner** and **GarmentHubShareExtension** must use the same **App Group**: `group.com.garmenthub.garmenthubMobile` (*Signing & Capabilities* → App Groups on **both** targets).
+3. **Runner** may need the **Siri** capability for `INSendMessageIntent` donation (`GarmentHubShareIOS.swift`).
+4. Human checklist after pull: [`packages/mobile/ios/README.md`](packages/mobile/ios/README.md).
+5. Longer doc: [`packages/mobile/doc/ios_vendor_share.md`](packages/mobile/doc/ios_vendor_share.md).

@@ -1,12 +1,15 @@
-/// Extra for [`/vendor/inbound-share`](../../core/routing/app_router.dart) when opening from Android share.
+/// [GoRoute.extra] for [VendorInboundShareScreen].
 class VendorInboundShareArgs {
-  VendorInboundShareArgs(
-    this.paths, {
+  const VendorInboundShareArgs(
+    this.imagePaths, {
     this.preselectedProductId,
     this.preselectedProductName,
   });
 
-  final List<String> paths;
+  /// Local filesystem paths (plugin copies content URIs to cache).
+  final List<String> imagePaths;
+
+  /// From Android shortcut / iOS suggestion handoff when present.
   final String? preselectedProductId;
   final String? preselectedProductName;
 }

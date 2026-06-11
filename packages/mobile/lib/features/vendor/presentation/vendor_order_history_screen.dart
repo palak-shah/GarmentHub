@@ -1,84 +1,142 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import 'package:intl/intl.dart';
 
 import '../../../core/network/api_error.dart';
+import '../../../shared/widgets/gh_empty_state.dart';
 import '../vendor_providers.dart';
-import 'vendor_ui_widgets.dart';
 
 class VendorOrderHistoryScreen extends ConsumerWidget {
   const VendorOrderHistoryScreen({super.key});
 
+  static String? _firstImageUrl(Map<String, dynamic> product) {
+    final images = product['images'];
+    if (images is! List || images.isEmpty) return null;
+    final first = images.first;
+    if (first is String) return first;
+    if (first is Map<String, dynamic>) return first['url']?.toString();
+    return null;
+  }
+
+  static String? _formatIso(dynamic v) {
+    if (v is! String || v.isEmpty) return null;
+    final dt = DateTime.tryParse(v);
+    if (dt == null) return v;
+    return DateFormat.yMMMd().add_jm().format(dt.toLocal());
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final scheme = Theme.of(context).colorScheme;
+    final text = Theme.of(context).textTheme;
     final async = ref.watch(vendorIncomingProvider);
-    final theme = Theme.of(context);
-    final color = theme.colorScheme;
-
     return Scaffold(
-      backgroundColor: color.surface,
       appBar: AppBar(title: const Text('Order history')),
       body: async.when(
         data: (list) {
           final done = list.where((e) => e is Map && e['status'] != 'PENDING').toList();
           if (done.isEmpty) {
-            return Center(
-              child: Text('No history yet', style: theme.textTheme.bodyLarge?.copyWith(color: color.onSurfaceVariant)),
+            return const GhEmptyState(
+              icon: Icons.history,
+              title: 'No completed responses yet',
+              subtitle: 'Accepted or declined line items will show here.',
             );
           }
-          return ListView.separated(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-            itemCount: done.length,
-            separatorBuilder: (_, _) => const SizedBox(height: 12),
-            itemBuilder: (context, i) {
-              final it = done[i] as Map<String, dynamic>;
-              final order = it['order'] is Map ? Map<String, dynamic>.from(it['order'] as Map) : <String, dynamic>{};
-              final customerTitle = customerDisplayName(order);
-              final status = it['status']?.toString() ?? '—';
-              final qty = (it['requestedQty'] as num?)?.toInt() ?? 0;
-              final when = formatVendorOrderDate(it['respondedAt']?.toString() ?? it['createdAt']?.toString());
+          return RefreshIndicator(
+            onRefresh: () async => ref.invalidate(vendorIncomingProvider),
+            child: ListView.builder(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+              itemCount: done.length,
+              itemBuilder: (context, i) {
+                final it = done[i] as Map<String, dynamic>;
+                final product = it['product'] as Map<String, dynamic>? ?? {};
+                final order = it['order'] as Map<String, dynamic>? ?? {};
+                final name = product['name']?.toString() ?? 'Product';
+                final status = it['status']?.toString() ?? '';
+                final orderId = order['id'] as String? ?? '';
+                final qty = it['requestedQty'];
+                final thumb = _firstImageUrl(product);
+                final when = _formatIso(it['respondedAt']) ?? _formatIso(it['createdAt']);
 
-              return VendorCard(
-                onTap: () => showVendorOrderItemSheet(context, it),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                return Card(
+                  elevation: 0,
+                  margin: const EdgeInsets.only(bottom: 10),
+                  color: scheme.surfaceContainerLow,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  child: InkWell(
+                    onTap: orderId.isEmpty ? null : () => context.push('/orders/$orderId'),
+                    borderRadius: BorderRadius.circular(14),
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Row(
                         children: [
-                          Text(
-                            customerTitle,
-                            style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-                          ),
-                          const SizedBox(height: 8),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 6,
-                            crossAxisAlignment: WrapCrossAlignment.center,
-                            children: [
-                              OrderStatusChip(label: status),
-                              QtyChip(qty: qty),
-                            ],
-                          ),
-                          if (when.isNotEmpty) ...[
-                            const SizedBox(height: 8),
-                            Text(
-                              when,
-                              style: theme.textTheme.bodySmall?.copyWith(color: color.onSurfaceVariant, height: 1.3),
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(10),
+                            child: SizedBox(
+                              width: 52,
+                              height: 52,
+                              child: thumb == null || thumb.isEmpty
+                                  ? ColoredBox(
+                                      color: scheme.surfaceContainerHighest,
+                                      child: Icon(Icons.image_outlined, color: scheme.onSurfaceVariant, size: 22),
+                                    )
+                                  : Image.network(thumb, fit: BoxFit.cover),
                             ),
-                          ],
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(name, style: text.titleSmall?.copyWith(fontWeight: FontWeight.w600)),
+                                const SizedBox(height: 6),
+                                Wrap(
+                                  spacing: 8,
+                                  runSpacing: 6,
+                                  children: [
+                                    Chip(
+                                      label: Text(status, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
+                                      visualDensity: VisualDensity.compact,
+                                      padding: EdgeInsets.zero,
+                                      backgroundColor: scheme.secondaryContainer,
+                                      side: BorderSide.none,
+                                    ),
+                                    if (qty != null)
+                                      Chip(
+                                        label: Text('Qty $qty', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
+                                        visualDensity: VisualDensity.compact,
+                                        padding: EdgeInsets.zero,
+                                        backgroundColor: scheme.surfaceContainerHighest,
+                                        side: BorderSide.none,
+                                      ),
+                                  ],
+                                ),
+                                if (when != null) ...[
+                                  const SizedBox(height: 4),
+                                  Text(when, style: text.labelSmall?.copyWith(color: scheme.onSurfaceVariant)),
+                                ],
+                              ],
+                            ),
+                          ),
+                          if (orderId.isNotEmpty)
+                            Icon(Icons.chevron_right_rounded, color: scheme.onSurfaceVariant),
                         ],
                       ),
                     ),
-                    Icon(Icons.chevron_right, color: color.onSurfaceVariant),
-                  ],
-                ),
-              );
-            },
+                  ),
+                );
+              },
+            ),
           );
         },
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Padding(padding: const EdgeInsets.all(24), child: Text(apiErrorMessageVerbose(e)))),
+        error: (e, _) => Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Text(apiErrorMessage(e), textAlign: TextAlign.center),
+          ),
+        ),
       ),
     );
   }

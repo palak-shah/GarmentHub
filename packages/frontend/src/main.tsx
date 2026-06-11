@@ -5,7 +5,6 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { Toaster } from 'react-hot-toast';
 import { queryClient } from './lib/queryClient';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { ClientDebugGlobalPanel } from './debug/ClientDebugGlobalPanel';
 import App from './App';
 import './index.css';
 
@@ -15,7 +14,6 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>
           <App />
-          <ClientDebugGlobalPanel />
           <Toaster
             position="top-center"
             containerStyle={{ zIndex: 99999 }}

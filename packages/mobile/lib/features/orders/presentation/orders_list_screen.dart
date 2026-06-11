@@ -4,10 +4,11 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../../core/api/api_providers.dart';
-import '../../../core/config/environment.dart';
 import '../../../core/network/api_error.dart';
 import '../../../shared/models/order.dart';
+import '../../../shared/models/product.dart';
 import '../../../shared/models/user.dart';
+import '../../../shared/widgets/gh_empty_state.dart';
 import '../domain/order_workflow.dart';
 
 final ordersListProvider = FutureProvider<List<Order>>((ref) async {
@@ -26,34 +27,14 @@ final ordersListProvider = FutureProvider<List<Order>>((ref) async {
   return [];
 });
 
-enum _OrdersTabKind { fromMe, status }
+enum _OrderTabKind { fromMe, waiting, done, cancelled }
 
-class _OrdersTabDef {
-  const _OrdersTabDef.fromMe() : kind = _OrdersTabKind.fromMe, label = 'Pending from me', statuses = const [];
-  const _OrdersTabDef.status(this.label, this.statuses) : kind = _OrdersTabKind.status;
-
-  final _OrdersTabKind kind;
+class _TabDef {
+  const _TabDef({required this.kind, required this.label, this.statuses = const []});
+  final _OrderTabKind kind;
   final String label;
   final List<String> statuses;
 }
-
-List<_OrdersTabDef> _tabDefsForRole(UserRole? role) {
-  if (role == UserRole.customer || role == UserRole.trader) {
-    return const [
-      _OrdersTabDef.fromMe(),
-      _OrdersTabDef.status('Waiting', ['PENDING']),
-      _OrdersTabDef.status('Done', ['ACCEPTED', 'PARTIALLY_ACCEPTED', 'CONFIRMED']),
-      _OrdersTabDef.status('Cancelled', ['REJECTED', 'CANCELLED']),
-    ];
-  }
-  return const [
-    _OrdersTabDef.status('Waiting', ['PENDING']),
-    _OrdersTabDef.status('Done', ['ACCEPTED', 'PARTIALLY_ACCEPTED', 'CONFIRMED']),
-    _OrdersTabDef.status('Cancelled', ['REJECTED', 'CANCELLED']),
-  ];
-}
-
-enum _TraderOrderFilter { all, managed, direct }
 
 class OrdersListScreen extends ConsumerStatefulWidget {
   const OrdersListScreen({super.key});
@@ -63,295 +44,216 @@ class OrdersListScreen extends ConsumerStatefulWidget {
 }
 
 class _OrdersListScreenState extends ConsumerState<OrdersListScreen> {
-  int? _activeTab;
-  _TraderOrderFilter _traderFilter = _TraderOrderFilter.all;
+  int _tabIndex = 0;
+  int _traderSegment = 0; // 0 all, 1 managed, 2 direct
+
+  List<_TabDef> _tabDefs(UserRole? role) {
+    if (role == UserRole.customer || role == UserRole.trader) {
+      return const [
+        _TabDef(kind: _OrderTabKind.fromMe, label: 'Pending from me'),
+        _TabDef(kind: _OrderTabKind.waiting, label: 'Waiting', statuses: ['PENDING']),
+        _TabDef(kind: _OrderTabKind.done, label: 'Done', statuses: ['ACCEPTED', 'PARTIALLY_ACCEPTED', 'CONFIRMED']),
+        _TabDef(kind: _OrderTabKind.cancelled, label: 'Cancelled', statuses: ['REJECTED', 'CANCELLED']),
+      ];
+    }
+    return const [
+      _TabDef(kind: _OrderTabKind.waiting, label: 'Waiting', statuses: ['PENDING']),
+      _TabDef(kind: _OrderTabKind.done, label: 'Done', statuses: ['ACCEPTED', 'PARTIALLY_ACCEPTED', 'CONFIRMED']),
+      _TabDef(kind: _OrderTabKind.cancelled, label: 'Cancelled', statuses: ['REJECTED', 'CANCELLED']),
+    ];
+  }
+
+  List<Order> _traderModeFilter(List<Order> orders, UserRole? role) {
+    if (role != UserRole.trader) return orders;
+    switch (_traderSegment) {
+      case 1:
+        return orders.where((o) => o.orderMode == 'MANAGED').toList();
+      case 2:
+        return orders.where((o) => o.orderMode == 'DIRECT').toList();
+      default:
+        return orders;
+    }
+  }
+
+  int _countForTab(List<Order> base, _TabDef def, String? userId, UserRole? role) {
+    switch (def.kind) {
+      case _OrderTabKind.fromMe:
+        if (userId == null || (role != UserRole.customer && role != UserRole.trader)) return 0;
+        return base.where((o) => isPendingActionFromViewer(o, o.items, role!, userId)).length;
+      case _OrderTabKind.waiting:
+      case _OrderTabKind.done:
+      case _OrderTabKind.cancelled:
+        return base.where((o) => def.statuses.contains(o.status)).length;
+    }
+  }
+
+  List<Order> _filterOrders(List<Order> orders, _TabDef def, String? userId, UserRole? role) {
+    switch (def.kind) {
+      case _OrderTabKind.fromMe:
+        if (userId == null || (role != UserRole.customer && role != UserRole.trader)) return [];
+        return orders.where((o) => isPendingActionFromViewer(o, o.items, role!, userId)).toList();
+      case _OrderTabKind.waiting:
+      case _OrderTabKind.done:
+      case _OrderTabKind.cancelled:
+        return orders.where((o) => def.statuses.contains(o.status)).toList();
+    }
+  }
+
+  String _fmtDate(String iso) {
+    final dt = DateTime.tryParse(iso);
+    if (dt == null) return iso;
+    return DateFormat('d MMM yyyy').format(dt.toLocal());
+  }
 
   @override
   Widget build(BuildContext context) {
-    final auth = ref.watch(authSessionProvider);
-    final user = auth.user;
-    final role = user?.role;
-    final userId = user?.id ?? '';
     final async = ref.watch(ordersListProvider);
+    final user = ref.watch(authSessionProvider.select((a) => a.user));
+    final role = user?.role;
+    final userId = user?.id;
+    final scheme = Theme.of(context).colorScheme;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Orders')),
+      appBar: AppBar(
+        title: const Text('Orders'),
+        centerTitle: false,
+        titleTextStyle: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+      ),
       body: async.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Padding(padding: const EdgeInsets.all(24), child: Text(apiErrorMessageVerbose(e)))),
         data: (orders) {
-          final tabDefs = _tabDefsForRole(role);
-          final isTrader = role == UserRole.trader;
-          final traderFiltered = isTrader
-              ? orders.where((o) {
-                  switch (_traderFilter) {
-                    case _TraderOrderFilter.managed:
-                      return o.orderMode == 'MANAGED';
-                    case _TraderOrderFilter.direct:
-                      return o.orderMode == 'DIRECT';
-                    case _TraderOrderFilter.all:
-                      return true;
-                  }
-                }).toList()
-              : orders;
+          final base = _traderModeFilter(orders, role);
+          final defs = _tabDefs(role);
+          final counts = defs.map((d) => _countForTab(base, d, userId, role)).toList();
+          final idx = _tabIndex.clamp(0, defs.length - 1);
+          final activeDef = defs[idx];
+          final filtered = _filterOrders(base, activeDef, userId, role);
 
-          final counts = List<int>.generate(tabDefs.length, (i) {
-            final def = tabDefs[i];
-            if (def.kind == _OrdersTabKind.fromMe && (role == UserRole.customer || role == UserRole.trader)) {
-              return traderFiltered.where((o) => isPendingActionFromViewer(o, o.items, role!, userId)).length;
-            }
-            if (def.kind == _OrdersTabKind.fromMe) return 0;
-            return traderFiltered.where((o) => def.statuses.contains(o.status)).length;
-          });
-
-          var smartIdx = 0;
-          if (userId.isNotEmpty && (role == UserRole.customer || role == UserRole.trader)) {
-            final fromMeIdx = tabDefs.indexWhere((d) => d.kind == _OrdersTabKind.fromMe);
-            final fromMeCount = fromMeIdx >= 0 ? counts[fromMeIdx] : 0;
-            if (fromMeCount > 0) {
-              smartIdx = fromMeIdx;
-            } else {
-              var firstNonEmpty = -1;
-              for (var j = 0; j < counts.length; j++) {
-                if (j != fromMeIdx && counts[j] > 0) {
-                  firstNonEmpty = j;
-                  break;
-                }
-              }
-              final waitingIdx = tabDefs.indexWhere((d) => d.label == 'Waiting');
-              smartIdx = firstNonEmpty >= 0 ? firstNonEmpty : (waitingIdx >= 0 ? waitingIdx : 0);
-            }
-          }
-
-          final effectiveTab = (_activeTab != null && _activeTab! < tabDefs.length) ? _activeTab! : smartIdx;
-          final safeTab = effectiveTab.clamp(0, tabDefs.length - 1);
-          final def = tabDefs[safeTab];
-
-          final filtered = traderFiltered.where((o) {
-            if (def.kind == _OrdersTabKind.fromMe) {
-              if (role != UserRole.customer && role != UserRole.trader) return false;
-              return isPendingActionFromViewer(o, o.items, role!, userId);
-            }
-            return def.statuses.contains(o.status);
-          }).toList();
-
-          final managedCount = isTrader ? orders.where((o) => o.orderMode == 'MANAGED').length : 0;
-          final directCount = isTrader ? orders.where((o) => o.orderMode == 'DIRECT').length : 0;
-
-          return RefreshIndicator(
-            onRefresh: () async => ref.invalidate(ordersListProvider),
-            child: CustomScrollView(
-              physics: const AlwaysScrollableScrollPhysics(),
-              slivers: [
-                if (isTrader)
-                  SliverToBoxAdapter(
-                    child: SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-                      child: Row(
-                        children: [
-                          _FilterChip(
-                            label: 'All',
-                            count: orders.length,
-                            selected: _traderFilter == _TraderOrderFilter.all,
-                            onTap: () => setState(() => _traderFilter = _TraderOrderFilter.all),
-                          ),
-                          const SizedBox(width: 6),
-                          _FilterChip(
-                            label: 'Managed',
-                            count: managedCount,
-                            selected: _traderFilter == _TraderOrderFilter.managed,
-                            onTap: () => setState(() => _traderFilter = _TraderOrderFilter.managed),
-                          ),
-                          const SizedBox(width: 6),
-                          _FilterChip(
-                            label: 'Direct',
-                            count: directCount,
-                            selected: _traderFilter == _TraderOrderFilter.direct,
-                            onTap: () => setState(() => _traderFilter = _TraderOrderFilter.direct),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                SliverToBoxAdapter(
-                  child: SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-                    child: Row(
-                      children: [
-                        for (var i = 0; i < tabDefs.length; i++) ...[
-                          if (i > 0) const SizedBox(width: 6),
-                          _FilterChip(
-                            label: tabDefs[i].label,
-                            count: counts[i],
-                            selected: safeTab == i,
-                            onTap: () => setState(() => _activeTab = i),
-                          ),
-                        ],
-                      ],
-                    ),
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (role == UserRole.trader)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                  child: SegmentedButton<int>(
+                    segments: const [
+                      ButtonSegment(value: 0, label: Text('All'), icon: Icon(Icons.grid_view_outlined, size: 18)),
+                      ButtonSegment(value: 1, label: Text('Managed')),
+                      ButtonSegment(value: 2, label: Text('Direct')),
+                    ],
+                    selected: {_traderSegment},
+                    onSelectionChanged: (s) => setState(() {
+                      _traderSegment = s.first;
+                      _tabIndex = 0;
+                    }),
                   ),
                 ),
-                if (filtered.isEmpty)
-                  SliverFillRemaining(
-                    hasScrollBody: false,
-                    child: Center(
-                      child: Padding(
-                        padding: const EdgeInsets.all(32),
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(Icons.receipt_long_outlined, size: 56, color: Theme.of(context).colorScheme.outline),
-                            const SizedBox(height: 16),
-                            Text(
-                              def.kind == _OrdersTabKind.fromMe ? 'Nothing needs your confirmation right now.' : 'No matching orders',
-                              textAlign: TextAlign.center,
-                              style: Theme.of(context).textTheme.titleMedium,
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              def.kind == _OrdersTabKind.fromMe
-                                  ? 'Open Waiting to follow orders in progress.'
-                                  : 'Your orders will show up here.',
-                              textAlign: TextAlign.center,
-                              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                                  ),
-                            ),
-                          ],
+              SizedBox(
+                height: 52,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  itemCount: defs.length,
+                  separatorBuilder: (_, unused) => const SizedBox(width: 8),
+                  itemBuilder: (context, i) {
+                    final d = defs[i];
+                    final n = counts[i];
+                    final selected = i == idx;
+                    return FilterChip(
+                      selected: selected,
+                      label: Text(n > 0 ? '${d.label} · $n' : d.label),
+                      onSelected: (_) => setState(() => _tabIndex = i),
+                      showCheckmark: false,
+                      selectedColor: scheme.primaryContainer,
+                      checkmarkColor: scheme.onPrimaryContainer,
+                    );
+                  },
+                ),
+              ),
+              Expanded(
+                child: filtered.isEmpty
+                    ? GhEmptyState(
+                        icon: Icons.receipt_long_outlined,
+                        title: 'No orders here',
+                        subtitle: 'Try another tab or pull to refresh.',
+                      )
+                    : RefreshIndicator(
+                        onRefresh: () async => ref.invalidate(ordersListProvider),
+                        child: ListView.separated(
+                          padding: const EdgeInsets.fromLTRB(12, 4, 12, 88),
+                          itemCount: filtered.length,
+                          separatorBuilder: (_, unused) => const SizedBox(height: 10),
+                          itemBuilder: (context, i) => _OrderCard(
+                            order: filtered[i],
+                            role: role,
+                            fmtDate: _fmtDate,
+                            onTap: () => context.push('/orders/${filtered[i].id}'),
+                          ),
                         ),
                       ),
-                    ),
-                  )
-                else
-                  SliverPadding(
-                    padding: const EdgeInsets.fromLTRB(12, 4, 12, 88),
-                    sliver: SliverList(
-                      delegate: SliverChildBuilderDelegate(
-                        (context, i) => Padding(
-                          padding: const EdgeInsets.only(bottom: 10),
-                          child: _OrderCardTile(order: filtered[i], role: role),
-                        ),
-                        childCount: filtered.length,
-                      ),
-                    ),
-                  ),
-              ],
-            ),
+              ),
+            ],
           );
         },
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (e, _) => Center(child: Text(apiErrorMessage(e))),
       ),
     );
   }
 }
 
-class _FilterChip extends StatelessWidget {
-  const _FilterChip({
-    required this.label,
-    required this.count,
-    required this.selected,
+class _OrderCard extends StatelessWidget {
+  const _OrderCard({
+    required this.order,
+    required this.role,
+    required this.fmtDate,
     required this.onTap,
   });
 
-  final String label;
-  final int count;
-  final bool selected;
+  final Order order;
+  final UserRole? role;
+  final String Function(String) fmtDate;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Material(
-      color: selected ? scheme.primary : scheme.surfaceContainerHighest,
-      borderRadius: BorderRadius.circular(20),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(20),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                label,
-                style: TextStyle(
-                  fontWeight: FontWeight.w600,
-                  fontSize: 13,
-                  color: selected ? scheme.onPrimary : scheme.onSurfaceVariant,
-                ),
-              ),
-              if (count > 0) ...[
-                const SizedBox(width: 6),
-                Text(
-                  '$count',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: selected ? scheme.onPrimary.withValues(alpha: 0.85) : scheme.onSurfaceVariant.withValues(alpha: 0.7),
-                  ),
-                ),
-              ],
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
+    final text = Theme.of(context).textTheme;
 
-class _OrderCardTile extends StatelessWidget {
-  const _OrderCardTile({required this.order, required this.role});
-
-  final Order order;
-  final UserRole? role;
-
-  static String _formatDate(String iso) {
-    final d = DateTime.tryParse(iso);
-    if (d == null) return iso;
-    return DateFormat('d MMM y').format(d.toLocal());
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     String headline;
     Color badgeBg;
     Color badgeFg;
     String? sub;
+    bool actionRequired = false;
     if (role == UserRole.customer) {
       final d = getCustomerOrderDecisionLabel(order, order.items);
       headline = d.headline;
-      sub = d.actionRequired ? 'Action required' : d.subline;
-      badgeFg = d.actionRequired ? const Color(0xFF92400E) : scheme.onSecondaryContainer;
-      badgeBg = d.actionRequired ? const Color(0xFFFEF3C7) : scheme.secondaryContainer;
+      sub = d.subline;
+      actionRequired = d.actionRequired;
+      badgeBg = d.actionRequired ? scheme.errorContainer : scheme.secondaryContainer;
+      badgeFg = d.actionRequired ? scheme.onErrorContainer : scheme.onSecondaryContainer;
     } else if (role == UserRole.trader) {
       final t = getTraderOrderStage(order, order.items);
       headline = t.stageLabel;
       sub = t.detail;
-      badgeFg = t.actionRequired ? const Color(0xFF92400E) : const Color(0xFF334155);
-      badgeBg = t.actionRequired ? const Color(0xFFFEF3C7) : const Color(0xFFE2E8F0);
+      actionRequired = t.actionRequired;
+      badgeBg = t.actionRequired ? scheme.tertiaryContainer : scheme.surfaceContainerHighest;
+      badgeFg = t.actionRequired ? scheme.onTertiaryContainer : scheme.onSurfaceVariant;
     } else {
       headline = order.status;
       badgeBg = scheme.surfaceContainerHighest;
       badgeFg = scheme.onSurfaceVariant;
     }
 
-    final trader = order.raw['trader'] is Map ? Map<String, dynamic>.from(order.raw['trader'] as Map) : null;
-    final traderLabel = trader == null
-        ? null
-        : (trader['businessName']?.toString().trim().isNotEmpty == true
-            ? trader['businessName'] as String
-            : trader['name']?.toString());
+    final shortId = order.id.length > 6 ? order.id.substring(order.id.length - 6).toUpperCase() : order.id.toUpperCase();
+    final managed = order.orderMode == 'MANAGED';
 
-    return Material(
-      color: scheme.surface,
-      elevation: 1,
-      shadowColor: Colors.black26,
-      borderRadius: BorderRadius.circular(14),
+    return Card(
+      elevation: 0,
+      color: scheme.surfaceContainerLow,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: InkWell(
-        onTap: () => context.push('/orders/${order.id}'),
-        borderRadius: BorderRadius.circular(14),
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
         child: Padding(
           padding: const EdgeInsets.all(14),
           child: Column(
@@ -364,56 +266,33 @@ class _OrderCardTile extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          'Order #${order.id.length > 6 ? order.id.substring(order.id.length - 6).toUpperCase() : order.id.toUpperCase()}',
-                          style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
-                        ),
+                        Text('Order #$shortId', style: text.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
                         const SizedBox(height: 4),
                         Row(
                           children: [
-                            Text(
-                              _formatDate(order.createdAt),
-                              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
-                            ),
+                            Text(fmtDate(order.createdAt), style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
                             const SizedBox(width: 8),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: order.orderMode == 'MANAGED' ? scheme.primaryContainer : scheme.surfaceContainerHighest,
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                              child: Text(
-                                order.orderMode == 'MANAGED' ? 'Managed' : 'Direct',
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w700,
-                                  color: order.orderMode == 'MANAGED' ? scheme.onPrimaryContainer : scheme.onSurfaceVariant,
-                                ),
-                              ),
+                            Chip(
+                              label: Text(managed ? 'Managed' : 'Direct', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600)),
+                              visualDensity: VisualDensity.compact,
+                              padding: EdgeInsets.zero,
+                              labelPadding: const EdgeInsets.symmetric(horizontal: 8),
+                              backgroundColor: managed ? scheme.primaryContainer : scheme.surfaceContainerHighest,
+                              side: BorderSide.none,
                             ),
                           ],
                         ),
-                        if (traderLabel != null && traderLabel.isNotEmpty)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 4),
-                            child: Text(
-                              'via $traderLabel',
-                              style: Theme.of(context).textTheme.labelSmall?.copyWith(color: scheme.outline),
-                            ),
-                          ),
                       ],
                     ),
                   ),
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(color: badgeBg, borderRadius: BorderRadius.circular(8)),
-                        child: Text(
-                          headline,
-                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: badgeFg),
-                        ),
+                      Chip(
+                        label: Text(headline, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: badgeFg)),
+                        backgroundColor: badgeBg,
+                        side: BorderSide.none,
+                        visualDensity: VisualDensity.compact,
                       ),
                       if (sub != null && sub.isNotEmpty)
                         Padding(
@@ -422,8 +301,10 @@ class _OrderCardTile extends StatelessWidget {
                             constraints: const BoxConstraints(maxWidth: 140),
                             child: Text(
                               sub,
+                              style: text.labelSmall?.copyWith(
+                                color: actionRequired ? scheme.error : scheme.onSurfaceVariant,
+                              ),
                               textAlign: TextAlign.end,
-                              style: Theme.of(context).textTheme.labelSmall?.copyWith(color: scheme.onSurfaceVariant, height: 1.2),
                             ),
                           ),
                         ),
@@ -432,46 +313,35 @@ class _OrderCardTile extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 12),
-              ...order.items.take(3).map((it) {
-                final imgs = it.product['images'];
-                String? rel;
-                if (imgs is List && imgs.isNotEmpty) {
-                  rel = imgs.first.toString();
-                }
-                final url = rel != null && rel.isNotEmpty ? Environment.resolveMediaUrl(rel) : '';
+              ...order.items.take(3).map((item) {
+                Product? p;
+                try {
+                  p = Product.fromJson(item.product);
+                } catch (_) {}
+                final img = p?.primaryImageUrl ?? '';
                 return Padding(
                   padding: const EdgeInsets.only(bottom: 6),
                   child: Row(
                     children: [
                       ClipRRect(
-                        borderRadius: BorderRadius.circular(6),
+                        borderRadius: BorderRadius.circular(8),
                         child: SizedBox(
-                          width: 32,
-                          height: 32,
-                          child: url.isNotEmpty
-                              ? Image.network(url, fit: BoxFit.cover)
-                              : ColoredBox(color: scheme.surfaceContainerHighest, child: Icon(Icons.image_outlined, size: 16, color: scheme.outline)),
+                          width: 36,
+                          height: 36,
+                          child: img.isEmpty
+                              ? ColoredBox(color: scheme.surfaceContainerHighest, child: Icon(Icons.image_outlined, size: 18, color: scheme.onSurfaceVariant))
+                              : Image.network(img, fit: BoxFit.cover),
                         ),
                       ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          it.product['name']?.toString() ?? 'Product',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.bodyMedium,
-                        ),
-                      ),
-                      Text('×${it.requestedQty}', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
+                      const SizedBox(width: 10),
+                      Expanded(child: Text(p?.name ?? 'Product', maxLines: 1, overflow: TextOverflow.ellipsis, style: text.bodyMedium)),
+                      Text('×${item.requestedQty}', style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
                     ],
                   ),
                 );
               }),
               if (order.items.length > 3)
-                Text(
-                  '+${order.items.length - 3} more items',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.outline),
-                ),
+                Text('+${order.items.length - 3} more', style: text.labelSmall?.copyWith(color: scheme.onSurfaceVariant)),
             ],
           ),
         ),

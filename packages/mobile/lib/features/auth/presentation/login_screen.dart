@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/api/api_providers.dart';
 import '../../../core/network/api_error.dart';
+import '../../../shared/widgets/gh_labeled_field.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -26,6 +27,16 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     super.dispose();
   }
 
+  InputDecoration _deco(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return InputDecoration(
+      filled: true,
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      fillColor: scheme.surfaceContainerHighest,
+    );
+  }
+
   Future<void> _sendOtp() async {
     final phone = _phone.text.trim();
     if (phone.isEmpty) {
@@ -45,7 +56,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     } catch (e) {
       setState(() => _loading = false);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(apiErrorMessageVerbose(e))));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(apiErrorMessage(e))));
       }
     }
   }
@@ -62,58 +73,127 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     } catch (e) {
       setState(() => _loading = false);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(apiErrorMessageVerbose(e))));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(apiErrorMessage(e))));
       }
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final text = Theme.of(context).textTheme;
+
     return Scaffold(
-      appBar: AppBar(title: const Text('Sign in')),
       body: SafeArea(
-        child: ListView(
-          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-          padding: const EdgeInsets.all(24),
-          children: [
-            TextField(
-              controller: _phone,
-              decoration: const InputDecoration(labelText: 'Phone'),
-              keyboardType: TextInputType.phone,
-            ),
-            const SizedBox(height: 16),
-            DropdownButtonFormField<String>(
-              key: ValueKey(_role ?? ''),
-              decoration: const InputDecoration(labelText: 'Role (optional)'),
-              initialValue: _role == null || _role!.isEmpty ? '' : _role,
-              items: const [
-                DropdownMenuItem(value: '', child: Text('Default')),
-                DropdownMenuItem(value: 'CUSTOMER', child: Text('Buyer')),
-                DropdownMenuItem(value: 'VENDOR', child: Text('Vendor')),
-                DropdownMenuItem(value: 'TRADER', child: Text('Trader')),
-                DropdownMenuItem(value: 'ADMIN', child: Text('Admin')),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const SizedBox(height: 24),
+              Icon(Icons.checkroom_rounded, size: 56, color: scheme.primary),
+              const SizedBox(height: 12),
+              Text('GarmentHub', textAlign: TextAlign.center, style: text.headlineSmall?.copyWith(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              Text(
+                'Sign in with your phone',
+                textAlign: TextAlign.center,
+                style: text.bodyLarge?.copyWith(color: scheme.onSurfaceVariant),
+              ),
+              const SizedBox(height: 40),
+              GhLabeledField(
+                label: 'Phone',
+                child: TextField(
+                  controller: _phone,
+                  decoration: _deco(context).copyWith(hintText: '10-digit mobile'),
+                  keyboardType: TextInputType.phone,
+                  enabled: !_sent,
+                ),
+              ),
+              const SizedBox(height: 20),
+              GhLabeledField(
+                label: 'Role (optional)',
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    ChoiceChip(
+                      label: const Text('Default'),
+                      selected: _role == null || _role!.isEmpty,
+                      onSelected: _sent
+                          ? null
+                          : (v) {
+                              if (v) setState(() => _role = null);
+                            },
+                    ),
+                    ChoiceChip(
+                      label: const Text('Buyer'),
+                      selected: _role == 'CUSTOMER',
+                      onSelected: _sent
+                          ? null
+                          : (v) {
+                              if (v) setState(() => _role = 'CUSTOMER');
+                            },
+                    ),
+                    ChoiceChip(
+                      label: const Text('Vendor'),
+                      selected: _role == 'VENDOR',
+                      onSelected: _sent
+                          ? null
+                          : (v) {
+                              if (v) setState(() => _role = 'VENDOR');
+                            },
+                    ),
+                    ChoiceChip(
+                      label: const Text('Trader'),
+                      selected: _role == 'TRADER',
+                      onSelected: _sent
+                          ? null
+                          : (v) {
+                              if (v) setState(() => _role = 'TRADER');
+                            },
+                    ),
+                    ChoiceChip(
+                      label: const Text('Admin'),
+                      selected: _role == 'ADMIN',
+                      onSelected: _sent
+                          ? null
+                          : (v) {
+                              if (v) setState(() => _role = 'ADMIN');
+                            },
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 28),
+              if (!_sent)
+                FilledButton(
+                  style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))),
+                  onPressed: _loading ? null : _sendOtp,
+                  child: _loading ? const SizedBox(height: 22, width: 22, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Send OTP'),
+                )
+              else ...[
+                GhLabeledField(
+                  label: 'OTP code',
+                  child: TextField(
+                    controller: _code,
+                    decoration: _deco(context),
+                    keyboardType: TextInputType.number,
+                  ),
+                ),
+                const SizedBox(height: 24),
+                FilledButton(
+                  style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))),
+                  onPressed: _loading ? null : _verify,
+                  child: _loading ? const SizedBox(height: 22, width: 22, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Verify & continue'),
+                ),
+                TextButton(
+                  onPressed: _loading ? null : () => setState(() => _sent = false),
+                  child: const Text('Change phone number'),
+                ),
               ],
-              onChanged: (v) => setState(() => _role = v == null || v.isEmpty ? null : v),
-            ),
-            const SizedBox(height: 24),
-            if (!_sent)
-              FilledButton(
-                onPressed: _loading ? null : _sendOtp,
-                child: _loading ? const SizedBox(height: 22, width: 22, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Send OTP'),
-              )
-            else ...[
-              TextField(
-                controller: _code,
-                decoration: const InputDecoration(labelText: 'OTP code'),
-                keyboardType: TextInputType.number,
-              ),
-              const SizedBox(height: 16),
-              FilledButton(
-                onPressed: _loading ? null : _verify,
-                child: _loading ? const SizedBox(height: 22, width: 22, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Verify'),
-              ),
             ],
-          ],
+          ),
         ),
       ),
     );

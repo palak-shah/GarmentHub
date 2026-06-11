@@ -1,5 +1,4 @@
 import type { CorsOptions } from 'cors';
-
 import { env } from './env';
 
 /**

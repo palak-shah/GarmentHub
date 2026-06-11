@@ -11,6 +11,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.text('Sign in'), findsOneWidget);
+    expect(find.text('GarmentHub'), findsOneWidget);
+    expect(find.text('Send OTP'), findsOneWidget);
   });
 }

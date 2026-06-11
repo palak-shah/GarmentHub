@@ -6,8 +6,6 @@ The Android APK uses a compile-time API URL; iOS uses the same flag:
 
 `--dart-define=API_BASE_URL=https://service.garmenthub.in/api`
 
-Optional: **invite links** copied from People/Connect use `--dart-define=WEB_APP_URL=https://<your-pwa-host>` (no trailing slash) so the clipboard includes `/login?invite=…`. If omitted, only the invite code is copied.
-
 Optional: append technical HTTP/Dio details to on-screen API errors while debugging: `--dart-define=CLIENT_DEBUG=true` (same as Android; default off for production).
 
 ## 1. On the Mac — install tools

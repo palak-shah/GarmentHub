@@ -3,18 +3,18 @@ import 'dart:io';
 /// Full API root including `/api`, e.g. `https://example.com/api`.
 ///
 /// Set at compile time: `--dart-define=API_BASE_URL=http://127.0.0.1:4000/api`
+///
+/// **Client debug** (optional): `--dart-define=CLIENT_DEBUG=true` appends
+/// technical details (URL, status, response snippets) to API error messages on
+/// screen. Default is **false**; do not enable in production builds you ship to
+/// end users (information disclosure).
 class Environment {
   Environment._();
 
   static const String _define = String.fromEnvironment('API_BASE_URL');
 
-  /// Web app origin for invite links (`/login?invite=…`), e.g. `https://app.example.com`.
-  /// `--dart-define=WEB_APP_URL=https://app.example.com`
-  static String get webAppBaseUrl {
-    const w = String.fromEnvironment('WEB_APP_URL');
-    if (w.isNotEmpty) return w.replaceAll(RegExp(r'/$'), '');
-    return '';
-  }
+  /// When true, [apiErrorMessage] appends a technical debug block for developers.
+  static const bool clientDebug = bool.fromEnvironment('CLIENT_DEBUG', defaultValue: false);
 
   /// Android emulator → host loopback; iOS simulator can use localhost via define.
   static String get apiBaseUrl {

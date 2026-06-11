@@ -2,12 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/config/environment.dart';
 import '../../../core/network/api_error.dart';
 import '../../../core/providers/app_providers.dart';
 import '../../../shared/models/product.dart';
 import '../../../shared/models/user.dart';
 import '../domain/customer_home_feed.dart';
-import 'home_product_card.dart';
+import '../domain/trader_shared_feed.dart';
+import '../../../shared/widgets/gh_product_grid_tile.dart';
+import '../../products/presentation/trader_gallery_screen.dart' show TraderGallerySharedImagesExtra;
 import 'home_providers.dart';
 
 /// Customer / trader home — routes by role (mirrors PWA `Home.tsx`).
@@ -86,7 +89,7 @@ class _CustomerHomeScaffoldState extends ConsumerState<_CustomerHomeScaffold> {
                 error: (e, _) => Center(
                   child: Padding(
                     padding: const EdgeInsets.all(24),
-                    child: Text(apiErrorMessageVerbose(e), textAlign: TextAlign.center),
+                    child: Text(apiErrorMessage(e), textAlign: TextAlign.center),
                   ),
                 ),
                 data: (state) => _CustomerHomeScrollBody(
@@ -226,21 +229,6 @@ class _CustomerHomeScrollBody extends ConsumerStatefulWidget {
 
 class _CustomerHomeScrollBodyState extends ConsumerState<_CustomerHomeScrollBody> {
   String? _activeStoryTraderId;
-
-  int? _sharedCount(CustomerHomeFeedState state, String productId) {
-    final n = state.sharedPhotoCountByProductId[productId] ?? 0;
-    return n > 0 ? n : null;
-  }
-
-  void _openCustomerProduct(BuildContext context, Product p, CustomerHomeFeedState state) {
-    final n = state.sharedPhotoCountByProductId[p.id] ?? 0;
-    if (n > 0) {
-      final ctx = shareOrderContextForProduct(p.id, state.normalizedShares);
-      context.push('/products/${p.id}/shared-photos', extra: ctx);
-    } else {
-      context.push('/products/${p.id}');
-    }
-  }
 
   List<Product> _filterBySearch(List<Product> list, String q) {
     final s = q.toLowerCase().trim();
@@ -385,6 +373,16 @@ class _CustomerHomeScrollBodyState extends ConsumerState<_CustomerHomeScrollBody
   }
 
   List<Widget> _sliverBucketed(BuildContext context, CustomerHomeFeedState state, String? categoryId) {
+    final extras = <String, int>{};
+    for (final day in state.dateBuckets) {
+      for (final tb in day.traders) {
+        for (final row in tb.rows) {
+          if (categoryId != null && row.product.categoryId != categoryId) continue;
+          extras[row.product.id] = row.photoCount;
+        }
+      }
+    }
+
     final slivers = <Widget>[];
     for (final day in state.dateBuckets) {
       slivers.add(
@@ -424,7 +422,7 @@ class _CustomerHomeScrollBodyState extends ConsumerState<_CustomerHomeScrollBody
             ),
           ),
         );
-        slivers.add(_sliverProductGridForRows(context, rows, state));
+        slivers.add(_sliverProductGridForRows(context, rows, extras, state));
       }
     }
     return slivers;
@@ -433,6 +431,7 @@ class _CustomerHomeScrollBodyState extends ConsumerState<_CustomerHomeScrollBody
   Widget _sliverProductGridForRows(
     BuildContext context,
     List<CustomerTraderRow> rows,
+    Map<String, int> photoExtras,
     CustomerHomeFeedState state,
   ) {
     final products = rows.map((r) => r.product).toList();
@@ -448,11 +447,13 @@ class _CustomerHomeScrollBodyState extends ConsumerState<_CustomerHomeScrollBody
         delegate: SliverChildBuilderDelegate(
           (context, i) {
             final p = products[i];
-            return HomeProductCard(
+            final n = photoExtras[p.id] ?? 1;
+            return GhProductGridTile(
               product: p,
               sharedBy: state.productTraderNameByProductId[p.id],
-              photoCount: _sharedCount(state, p.id),
-              onTap: () => _openCustomerProduct(context, p, state),
+              photoCount: n > 1 ? n : null,
+              cornerPhotoCount: p.mediaCount > 0 ? p.mediaCount : null,
+              onTap: () => context.push('/products/${p.id}'),
             );
           },
           childCount: products.length,
@@ -480,11 +481,11 @@ class _CustomerHomeScrollBodyState extends ConsumerState<_CustomerHomeScrollBody
         delegate: SliverChildBuilderDelegate(
           (context, i) {
             final p = products[i];
-            return HomeProductCard(
+            return GhProductGridTile(
               product: p,
               sharedBy: state.productTraderNameByProductId[p.id],
-              photoCount: _sharedCount(state, p.id),
-              onTap: () => _openCustomerProduct(context, p, state),
+              cornerPhotoCount: p.mediaCount > 0 ? p.mediaCount : null,
+              onTap: () => context.push('/products/${p.id}'),
             );
           },
           childCount: products.length,
@@ -555,7 +556,7 @@ class _TraderHomeScaffoldState extends ConsumerState<_TraderHomeScaffold> {
     if (raw == null) return [];
     final out = <Product>[];
     for (final e in raw) {
-      if (e is Map<String, dynamic>) out.add(Product.fromJson(e));
+      if (e is Map) out.add(Product.fromJson(Map<String, dynamic>.from(e)));
     }
     return out;
   }
@@ -569,6 +570,7 @@ class _TraderHomeScaffoldState extends ConsumerState<_TraderHomeScaffold> {
     final alerts = ref.watch(traderAlertsProvider);
     final newFeed = ref.watch(traderNewFeedProvider);
     final wfFeed = ref.watch(traderWorkflowFeedProvider);
+    final sentSharesAsync = ref.watch(traderSentSharesProvider);
 
     return Scaffold(
       body: SafeArea(
@@ -585,10 +587,18 @@ class _TraderHomeScaffoldState extends ConsumerState<_TraderHomeScaffold> {
                 ref.invalidate(traderNewFeedProvider);
                 ref.invalidate(traderWorkflowFeedProvider);
                 ref.invalidate(traderSentSharesProvider);
-                await Future.wait([
+                final t = ref.read(traderHomeTabProvider);
+                final futures = <Future<dynamic>>[
                   ref.read(traderWorkflowCountsProvider.future),
                   ref.read(traderNewFeedProvider.future),
-                ]);
+                ];
+                if (t != TraderWorkflowTab.neW) {
+                  futures.add(ref.read(traderWorkflowFeedProvider.future));
+                }
+                if (t == TraderWorkflowTab.shared) {
+                  futures.add(ref.read(traderSentSharesProvider.future));
+                }
+                await Future.wait(futures);
               },
             ),
             alerts.when(
@@ -649,7 +659,7 @@ class _TraderHomeScaffoldState extends ConsumerState<_TraderHomeScaffold> {
               ),
             ),
             Expanded(
-              child: _buildTraderBody(context, tab, newFeed, wfFeed),
+              child: _buildTraderBody(context, tab, newFeed, wfFeed, sentSharesAsync),
             ),
           ],
         ),
@@ -662,13 +672,14 @@ class _TraderHomeScaffoldState extends ConsumerState<_TraderHomeScaffold> {
     TraderWorkflowTab tab,
     AsyncValue<TraderNewFeedResult?> newFeed,
     AsyncValue<Map<String, dynamic>?> wfFeed,
+    AsyncValue<List<dynamic>?> sentSharesAsync,
   ) {
     final q = _searchCtrl.text.toLowerCase().trim();
 
     if (tab == TraderWorkflowTab.neW) {
       return newFeed.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text(apiErrorMessageVerbose(e))),
+        error: (e, _) => Center(child: Text(apiErrorMessage(e))),
         data: (data) {
           if (data == null) return const SizedBox.shrink();
           if (data.isGrouped && data.groupedRaw != null) {
@@ -713,7 +724,12 @@ class _TraderHomeScaffoldState extends ConsumerState<_TraderHomeScaffold> {
                       itemCount: filteredProds.length,
                       itemBuilder: (_, i) {
                         final p = filteredProds[i];
-                        return HomeProductCard(product: p, onTap: () => context.push('/products/${p.id}'));
+                        return GhProductGridTile(
+                          product: p,
+                          centerHint: 'Tap to pick & share',
+                          cornerPhotoCount: p.mediaCount > 0 ? p.mediaCount : null,
+                          onTap: () => context.push('/products/${p.id}/gallery'),
+                        );
                       },
                     ),
                     const SizedBox(height: 12),
@@ -737,7 +753,12 @@ class _TraderHomeScaffoldState extends ConsumerState<_TraderHomeScaffold> {
               childAspectRatio: 3 / 4,
             ),
             itemCount: list.length,
-            itemBuilder: (_, i) => HomeProductCard(product: list[i], onTap: () => context.push('/products/${list[i].id}')),
+            itemBuilder: (_, i) => GhProductGridTile(
+              product: list[i],
+              centerHint: 'Tap to pick & share',
+              cornerPhotoCount: list[i].mediaCount > 0 ? list[i].mediaCount : null,
+              onTap: () => context.push('/products/${list[i].id}/gallery'),
+            ),
           );
         },
       );
@@ -745,27 +766,190 @@ class _TraderHomeScaffoldState extends ConsumerState<_TraderHomeScaffold> {
 
     return wfFeed.when(
       loading: () => const Center(child: CircularProgressIndicator()),
-      error: (e, _) => Center(child: Text(apiErrorMessageVerbose(e))),
+      error: (e, _) => Center(child: Text(apiErrorMessage(e))),
       data: (map) {
         if (map == null) return const SizedBox.shrink();
-        final raw = map['products'] as List?;
-        var list = _parseProducts(raw);
-        if (q.isNotEmpty) {
-          list = list.where((p) => p.name.toLowerCase().contains(q)).toList();
+        return _buildTraderNonNewWorkflowBody(context, tab, map, q, sentSharesAsync);
+      },
+    );
+  }
+
+  Widget _buildTraderNonNewWorkflowBody(
+    BuildContext context,
+    TraderWorkflowTab tab,
+    Map<String, dynamic> map,
+    String q,
+    AsyncValue<List<dynamic>?> sentSharesAsync,
+  ) {
+    if (tab == TraderWorkflowTab.shared) {
+      return sentSharesAsync.when(
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (e, _) => Center(child: Text(apiErrorMessage(e))),
+        data: (sent) => _buildTraderWorkflowProductFeed(context, tab, map, q, sent ?? const []),
+      );
+    }
+    return _buildTraderWorkflowProductFeed(context, tab, map, q, const []);
+  }
+
+  Widget _buildTraderWorkflowProductFeed(
+    BuildContext context,
+    TraderWorkflowTab tab,
+    Map<String, dynamic> map,
+    String q,
+    List<dynamic> sentShares,
+  ) {
+    final raw = map['products'] as List?;
+    var list = _parseProducts(raw);
+    final sharedMap = tab == TraderWorkflowTab.shared ? buildProductSharedWithMap(sentShares) : <String, String>{};
+    final sharedVisualByProduct =
+        tab == TraderWorkflowTab.shared
+            ? buildTraderSharedProductVisualMap(
+                sentShares,
+                workflowProductsById: {for (final p in list) p.id: p},
+              )
+            : const <String, TraderSharedProductVisual>{};
+
+    void openTraderProductGallery(Product p) {
+      if (tab == TraderWorkflowTab.shared) {
+        final v = sharedVisualByProduct[p.id];
+        if (v != null && v.orderedImageIds.isNotEmpty) {
+          context.push(
+            '/products/${p.id}/gallery',
+            extra: TraderGallerySharedImagesExtra(
+              imageIdsInShareOrder: v.orderedImageIds,
+              sharedWithLabel: sharedMap[p.id],
+            ),
+          );
+          return;
         }
-        if (list.isEmpty) {
-          return const Center(child: Text('No products in this tab'));
-        }
-        return GridView.builder(
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 80),
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 2,
-            mainAxisSpacing: 8,
-            crossAxisSpacing: 8,
-            childAspectRatio: 3 / 4,
-          ),
-          itemCount: list.length,
-          itemBuilder: (_, i) => HomeProductCard(product: list[i], onTap: () => context.push('/products/${list[i].id}')),
+      }
+      context.push('/products/${p.id}/gallery');
+    }
+
+    ({String? cover, int? corner, int? centerPhoto}) traderTilePhotos(Product p) {
+      if (tab != TraderWorkflowTab.shared) {
+        return (cover: null, corner: p.mediaCount > 0 ? p.mediaCount : null, centerPhoto: null);
+      }
+      final v = sharedVisualByProduct[p.id];
+      if (v == null || v.sharedPhotoCount == 0) {
+        return (cover: null, corner: p.mediaCount > 0 ? p.mediaCount : null, centerPhoto: null);
+      }
+      final rawUrl = v.coverUrlRaw;
+      final coverResolved =
+          rawUrl != null && rawUrl.isNotEmpty ? Environment.resolveMediaUrl(rawUrl) : null;
+      return (
+        cover: coverResolved,
+        corner: v.sharedPhotoCount,
+        centerPhoto: v.sharedPhotoCount > 1 ? v.sharedPhotoCount : null,
+      );
+    }
+
+    if (q.isNotEmpty) {
+      if (tab == TraderWorkflowTab.shared) {
+        list = list
+            .where(
+              (p) => productMatchesTraderSharedSearch(
+                p,
+                q,
+                (sharedMap[p.id] ?? '').toLowerCase(),
+              ),
+            )
+            .toList();
+      } else {
+        list = list.where((p) => p.name.toLowerCase().contains(q)).toList();
+      }
+    }
+
+    if (list.isEmpty) {
+      return Center(child: Text(q.isNotEmpty ? 'No matches' : 'No products in this tab'));
+    }
+
+    if (tab == TraderWorkflowTab.shared && q.isEmpty) {
+      final sections = buildTraderSharedSections(sentShares, list);
+      if (sections.isNotEmpty) {
+        return ListView.builder(
+          padding: const EdgeInsets.only(bottom: 80),
+          itemCount: sections.length,
+          itemBuilder: (context, si) {
+            final section = sections[si];
+            final label = formatTraderSharedSectionDateLabel(section.dateKey);
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        label,
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                              fontWeight: FontWeight.bold,
+                              color: Theme.of(context).colorScheme.onSurfaceVariant,
+                              letterSpacing: 0.6,
+                            ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Sent to customers',
+                        style: TextStyle(fontSize: 10, color: Theme.of(context).hintColor),
+                      ),
+                    ],
+                  ),
+                ),
+                GridView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 2,
+                    mainAxisSpacing: 8,
+                    crossAxisSpacing: 8,
+                    childAspectRatio: 3 / 4,
+                  ),
+                  itemCount: section.products.length,
+                  itemBuilder: (_, i) {
+                    final p = section.products[i];
+                    final ph = traderTilePhotos(p);
+                    return GhProductGridTile(
+                      product: p,
+                      sharedWithLabel: sharedMap[p.id],
+                      coverImageUrlOverride: ph.cover,
+                      cornerPhotoCount: ph.corner,
+                      photoCount: ph.centerPhoto,
+                      centerHint: 'Tap to pick & share',
+                      onTap: () => openTraderProductGallery(p),
+                    );
+                  },
+                ),
+                const SizedBox(height: 12),
+              ],
+            );
+          },
+        );
+      }
+    }
+
+    return GridView.builder(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 80),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        mainAxisSpacing: 8,
+        crossAxisSpacing: 8,
+        childAspectRatio: 3 / 4,
+      ),
+      itemCount: list.length,
+      itemBuilder: (_, i) {
+        final p = list[i];
+        final ph = traderTilePhotos(p);
+        return GhProductGridTile(
+          product: p,
+          sharedWithLabel: tab == TraderWorkflowTab.shared ? sharedMap[p.id] : null,
+          coverImageUrlOverride: ph.cover,
+          cornerPhotoCount: ph.corner,
+          photoCount: ph.centerPhoto,
+          centerHint: 'Tap to pick & share',
+          onTap: () => openTraderProductGallery(p),
         );
       },
     );

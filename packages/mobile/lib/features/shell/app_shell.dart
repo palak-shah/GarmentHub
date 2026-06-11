@@ -11,7 +11,6 @@ class AppShell extends StatelessWidget {
 
   static const _hidePrefixes = [
     '/products/',
-    '/orders/',
     '/bulk-order',
     '/trader/share',
     '/trader/groups',
@@ -30,43 +29,22 @@ class AppShell extends StatelessWidget {
     }
 
     final items = _navItems(role);
-    final idx = _indexForPath(loc, items, role);
-    final theme = Theme.of(context);
-
-    Widget bottomBar = NavigationBar(
-      selectedIndex: idx.clamp(0, items.length - 1),
-      onDestinationSelected: (i) => context.go(items[i].path),
-      destinations: [
-        for (final it in items)
-          NavigationDestination(icon: Icon(it.icon), label: it.label),
-      ],
-    );
-
-    if (role == UserRole.vendor) {
-      final nav = theme.navigationBarTheme;
-      bottomBar = Theme(
-        data: theme.copyWith(
-          navigationBarTheme: nav.copyWith(
-            indicatorShape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          ),
-        ),
-        child: bottomBar,
-      );
-    }
+    final idx = _indexForPath(loc, items);
 
     return Scaffold(
       body: child,
-      bottomNavigationBar: bottomBar,
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: idx.clamp(0, items.length - 1),
+        onDestinationSelected: (i) => context.go(items[i].path),
+        destinations: [
+          for (final it in items)
+            NavigationDestination(icon: Icon(it.icon), label: it.label),
+        ],
+      ),
     );
   }
 
-  int _indexForPath(String path, List<_NavItem> items, UserRole role) {
-    // Vendor: upload and product CRUD live under the Products journey.
-    if (role == UserRole.vendor) {
-      if (path == '/vendor/upload' || path.startsWith('/vendor/products')) {
-        return 1;
-      }
-    }
+  int _indexForPath(String path, List<_NavItem> items) {
     for (var i = 0; i < items.length; i++) {
       final p = items[i].path;
       if (p == '/' || p == '/vendor' || p == '/admin') {
@@ -82,7 +60,7 @@ class AppShell extends StatelessWidget {
     switch (role) {
       case UserRole.vendor:
         return const [
-          _NavItem('/vendor', 'Home', Icons.grid_view_rounded),
+          _NavItem('/vendor', 'Home', Icons.dashboard_outlined),
           _NavItem('/vendor/products', 'Products', Icons.inventory_2_outlined),
           _NavItem('/network', 'Connect', Icons.people_outline),
           _NavItem('/vendor/orders', 'Orders', Icons.assignment_outlined),

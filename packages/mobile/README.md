@@ -2,7 +2,7 @@
 
 Aligned with [`packages/frontend`](../frontend): same API, roles, and journeys.
 
-**UI conventions:** see [docs/mobile-ui.md](docs/mobile-ui.md) (theme tokens, shell/nav, SafeArea, forms).
+**iPhone testing:** iOS builds require a **Mac + Xcode** (not Ubuntu). Step-by-step: [`doc/ios_device_testing.md`](doc/ios_device_testing.md).
 
 **This doc uses only this workspace layout and this API URL:**
 
@@ -42,28 +42,21 @@ flutter build web --dart-define=API_BASE_URL=http://garment-hub:4000/api
 
 - **Android emulator** (same machine): if `API_BASE_URL` is empty, the app defaults to `http://10.0.2.2:4000/api`.
 
-### Web app URL (invite links from mobile)
+## Client debug (on-screen error details)
 
-Network **Share invite** copies `Join me on GarmentHub! {url}` when a public web origin is known. Set the **same host** your users use to open the PWA login page (no trailing slash):
+Compile-time flag: `--dart-define=CLIENT_DEBUG=true`. When enabled, API/network error toasts and inline messages append a **technical** section (request URL, status, truncated body, Dio details). Default is **off** — keep it off for production APK/IPA/Web builds you give to end users.
 
 ```bash
 flutter run -d chrome \
   --dart-define=API_BASE_URL=http://127.0.0.1:4000/api \
-  --dart-define=WEB_APP_URL=http://localhost:5173
+  --dart-define=CLIENT_DEBUG=true
 ```
-
-If `WEB_APP_URL` is omitted, the app still copies a short message with the **invite code** only (no guessed URL). See [`lib/core/config/environment.dart`](lib/core/config/environment.dart).
-
-## Client debug (Flutter)
-
-**Concept:** same as the Vite PWA’s “client debug” story, but the compile-time flag is **`CLIENT_DEBUG`** (not `VITE_CLIENT_DEBUG`). When `true`, the app registers `FlutterError.onError` and `PlatformDispatcher.instance.onError`, shows a **dismissible bottom panel** for those failures, and [`apiErrorMessageVerbose`](lib/core/network/api_error.dart) appends Dio/status/body hints (truncated; `Authorization` lines redacted in debug text). Default is **`false`** — omit the define for release builds you ship to end users.
 
 ```bash
-cd /home/Palak/garmenthub/packages/mobile
-flutter run -d chrome --dart-define=CLIENT_DEBUG=true --dart-define=API_BASE_URL=http://127.0.0.1:4000/api
+flutter build apk --release \
+  --dart-define=API_BASE_URL=https://service.garmenthub.in/api \
+  --dart-define=CLIENT_DEBUG=true
 ```
-
-**PWA equivalent:** `VITE_CLIENT_DEBUG=true` in `packages/frontend` — see [`packages/frontend/README.md`](../frontend/README.md#client-debug-on-screen-error-details).
 
 ## Linux desktop + Snap Flutter
 
@@ -105,8 +98,6 @@ flutter run -d linux --dart-define=API_BASE_URL=http://127.0.0.1:4000/api
 If the window is blank over the tunnel: `export LIBGL_ALWAYS_INDIRECT=1` in that same shell before `flutter run`.
 
 ## Analyze / test
-
-**PWA parity checklist (manual):** [doc/pwa_parity_qa.md](doc/pwa_parity_qa.md)
 
 ```bash
 cd /home/Palak/garmenthub/packages/mobile

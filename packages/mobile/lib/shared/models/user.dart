@@ -10,8 +10,9 @@ enum UserRole {
 
   static UserRole? fromString(String? v) {
     if (v == null) return null;
+    final u = v.trim().toUpperCase();
     for (final r in UserRole.values) {
-      if (r.apiValue == v) return r;
+      if (r.apiValue == u) return r;
     }
     return null;
   }

@@ -2,9 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../core/api/api_providers.dart';
 import '../../../core/network/api_error.dart';
-import '../../../core/theme/app_theme.dart';
+import '../../../core/providers/app_providers.dart';
+import '../../../shared/models/user.dart';
+import '../../../shared/widgets/gh_labeled_field.dart';
 
 class ProfileScreen extends ConsumerStatefulWidget {
   const ProfileScreen({super.key});
@@ -18,8 +19,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   late final TextEditingController _business;
   late final TextEditingController _address;
   bool _loading = false;
-
-  static const _fieldRadius = 12.0;
 
   @override
   void initState() {
@@ -38,6 +37,17 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     super.dispose();
   }
 
+  InputDecoration _fieldDeco(BuildContext context, {String? hint}) {
+    final scheme = Theme.of(context).colorScheme;
+    return InputDecoration(
+      hintText: hint,
+      filled: true,
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      fillColor: scheme.surfaceContainerHighest,
+    );
+  }
+
   Future<void> _save() async {
     setState(() => _loading = true);
     try {
@@ -47,158 +57,110 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         'address': _address.text.trim(),
       });
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Profile updated')));
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Saved')));
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(apiErrorMessageVerbose(e))));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(apiErrorMessage(e))));
       }
     } finally {
       if (mounted) setState(() => _loading = false);
     }
   }
 
-  InputDecoration _flatFieldDecoration(ColorScheme color) {
-    final none = OutlineInputBorder(
-      borderRadius: BorderRadius.circular(_fieldRadius),
-      borderSide: BorderSide.none,
-    );
-    return InputDecoration(
-      filled: true,
-      fillColor: AppTheme.formFieldFillMuted,
-      border: none,
-      enabledBorder: none,
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(_fieldRadius),
-        borderSide: BorderSide(color: color.primary, width: 1.5),
-      ),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-      isDense: true,
-    );
-  }
-
-  Widget _readOnlyBlock(String label, String value) {
-    final theme = Theme.of(context);
-    final color = theme.colorScheme;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 18),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label.toUpperCase(),
-            style: theme.textTheme.labelSmall?.copyWith(
-              fontWeight: FontWeight.w600,
-              letterSpacing: 0.6,
-              color: color.onSurface.withValues(alpha: 0.65),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-            decoration: BoxDecoration(
-              color: AppTheme.formFieldFillMuted,
-              borderRadius: BorderRadius.circular(_fieldRadius),
-            ),
-            child: Text(
-              value,
-              style: theme.textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w700),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _editableField(String label, TextEditingController controller) {
-    final theme = Theme.of(context);
-    final color = theme.colorScheme;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 18),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label.toUpperCase(),
-            style: theme.textTheme.labelSmall?.copyWith(
-              fontWeight: FontWeight.w600,
-              letterSpacing: 0.6,
-              color: color.onSurface.withValues(alpha: 0.65),
-            ),
-          ),
-          const SizedBox(height: 8),
-          TextField(
-            controller: controller,
-            style: theme.textTheme.bodyLarge,
-            decoration: _flatFieldDecoration(color),
-          ),
-        ],
-      ),
-    );
+  Future<void> _logout() async {
+    await ref.read(authSessionProvider.notifier).logout();
+    if (mounted) context.go('/login');
   }
 
   @override
   Widget build(BuildContext context) {
     final u = ref.watch(authSessionProvider).user;
-    final theme = Theme.of(context);
-    final color = theme.colorScheme;
+    final scheme = Theme.of(context).colorScheme;
+    final text = Theme.of(context).textTheme;
+
+    Widget readBlock(String caption, String value) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: scheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(caption.toUpperCase(), style: text.labelSmall?.copyWith(color: scheme.onSurfaceVariant, fontWeight: FontWeight.w700, letterSpacing: 0.6)),
+            const SizedBox(height: 6),
+            Text(value, style: text.titleSmall?.copyWith(fontWeight: FontWeight.w600)),
+          ],
+        ),
+      );
+    }
 
     return Scaffold(
-      backgroundColor: color.surface,
       appBar: AppBar(
-        automaticallyImplyLeading: false,
+        title: const Text('Profile'),
         centerTitle: false,
-        titleSpacing: 20,
-        title: Text(
-          'Profile',
-          style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
-        ),
+        titleTextStyle: text.titleLarge?.copyWith(fontWeight: FontWeight.bold),
       ),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
         children: [
-          _editableField('Name', _name),
-          _editableField('Business name', _business),
-          _editableField('Address', _address),
-          _readOnlyBlock('Phone', u?.phone ?? '—'),
-          _readOnlyBlock('Role', u?.role.apiValue.toLowerCase() ?? '—'),
-          const SizedBox(height: 8),
-          SizedBox(
-            width: double.infinity,
-            height: 50,
-            child: FilledButton(
-              onPressed: _loading ? null : _save,
-              style: FilledButton.styleFrom(
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          GhLabeledField(
+            label: 'Name',
+            child: TextField(controller: _name, decoration: _fieldDeco(context)),
+          ),
+          const SizedBox(height: 18),
+          GhLabeledField(
+            label: 'Business name',
+            child: TextField(controller: _business, decoration: _fieldDeco(context, hint: 'Your business name')),
+          ),
+          const SizedBox(height: 18),
+          GhLabeledField(
+            label: 'Address',
+            child: TextField(controller: _address, maxLines: 2, decoration: _fieldDeco(context)),
+          ),
+          const SizedBox(height: 18),
+          readBlock('Phone', u?.phone ?? '—'),
+          const SizedBox(height: 12),
+          readBlock('Role', u?.role.apiValue.toLowerCase() ?? '—'),
+          if (u?.role == UserRole.trader) ...[
+            const SizedBox(height: 20),
+            Card(
+              elevation: 0,
+              color: scheme.surfaceContainerLow,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              child: ListTile(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                leading: CircleAvatar(
+                  backgroundColor: scheme.primaryContainer,
+                  child: Icon(Icons.groups_outlined, color: scheme.onPrimaryContainer),
+                ),
+                title: const Text('Customer groups', style: TextStyle(fontWeight: FontWeight.w600)),
+                subtitle: Text('Organize buyers and share products', style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
+                trailing: Icon(Icons.chevron_right, color: scheme.onSurfaceVariant),
+                onTap: () => context.push('/trader/groups'),
               ),
-              child: _loading
-                  ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                  : const Text('Save'),
             ),
+          ],
+          const SizedBox(height: 28),
+          FilledButton(
+            style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))),
+            onPressed: _loading ? null : _save,
+            child: _loading ? const SizedBox(height: 22, width: 22, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Save'),
           ),
           const SizedBox(height: 12),
-          SizedBox(
-            width: double.infinity,
-            height: 50,
-            child: FilledButton.tonal(
-              onPressed: () async {
-                await ref.read(authSessionProvider.notifier).logout();
-                if (context.mounted) context.go('/login');
-              },
-              style: FilledButton.styleFrom(
-                backgroundColor: AppTheme.formFieldFillMuted,
-                foregroundColor: const Color(0xFFC62828),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-              ),
-              child: const Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.logout, size: 20, color: Color(0xFFC62828)),
-                  SizedBox(width: 8),
-                  Text('Log out', style: TextStyle(fontWeight: FontWeight.w600, color: Color(0xFFC62828))),
-                ],
-              ),
+          FilledButton.tonal(
+            style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))),
+            onPressed: _loading ? null : _logout,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.logout, size: 20, color: scheme.error),
+                const SizedBox(width: 8),
+                Text('Log out', style: TextStyle(color: scheme.error, fontWeight: FontWeight.w600)),
+              ],
             ),
           ),
         ],

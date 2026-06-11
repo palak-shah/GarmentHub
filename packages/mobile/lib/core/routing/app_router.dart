@@ -11,7 +11,6 @@ import '../../features/products/presentation/product_list_screen.dart';
 import '../../features/products/presentation/product_detail_screen.dart';
 import '../../features/products/presentation/trader_gallery_screen.dart';
 import '../../features/curation/presentation/customer_shared_photos_screen.dart';
-import '../../features/orders/domain/bulk_order_draft.dart';
 import '../../features/orders/presentation/bulk_order_screen.dart';
 import '../../features/orders/presentation/orders_list_screen.dart';
 import '../../features/orders/presentation/order_detail_screen.dart';
@@ -21,6 +20,7 @@ import '../../features/network/presentation/trader_insights_screen.dart';
 import '../../features/notifications/presentation/notifications_screen.dart';
 import '../../features/profile/presentation/profile_screen.dart';
 import '../../features/curation/presentation/share_products_screen.dart';
+import '../../features/curation/domain/trader_share_line.dart';
 import '../../features/curation/presentation/customer_groups_screen.dart';
 import '../../features/curation/presentation/customer_group_detail_screen.dart';
 import '../../features/vendor/presentation/vendor_dashboard_screen.dart';
@@ -100,37 +100,31 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         },
         routes: [
           GoRoute(path: '/', builder: (context, state) => const CustomerHomeScreen()),
+          GoRoute(path: '/search', builder: (context, state) => const ProductListScreen()),
+          /// Longer paths first so `/products/:id` never wins over `/products/:id/gallery`.
           GoRoute(
-            path: '/search',
-            builder: (context, state) => ProductListScreen(initialUri: state.uri),
+            path: '/products/:id/gallery',
+            builder: (context, state) {
+              final extra = state.extra;
+              if (extra is TraderGallerySharedImagesExtra) {
+                return TraderGalleryScreen(
+                  productId: state.pathParameters['id']!,
+                  restrictToSharedImageIds: extra.imageIdsInShareOrder,
+                  sharedContextRecipientSummary: extra.sharedWithLabel,
+                );
+              }
+              return TraderGalleryScreen(productId: state.pathParameters['id']!);
+            },
+          ),
+          GoRoute(
+            path: '/products/:id/shared-photos',
+            builder: (context, state) => CustomerSharedPhotosScreen(productId: state.pathParameters['id']!),
           ),
           GoRoute(
             path: '/products/:id',
             builder: (context, state) => ProductDetailScreen(productId: state.pathParameters['id']!),
           ),
-          GoRoute(
-            path: '/products/:id/gallery',
-            builder: (context, state) => TraderGalleryScreen(productId: state.pathParameters['id']!),
-          ),
-          GoRoute(
-            path: '/products/:id/shared-photos',
-            builder: (context, state) {
-              final extra = state.extra;
-              final ctx = extra is ShareOrderContext ? extra : null;
-              return CustomerSharedPhotosScreen(
-                productId: state.pathParameters['id']!,
-                shareOrderContext: ctx,
-              );
-            },
-          ),
-          GoRoute(
-            path: '/bulk-order',
-            builder: (context, state) {
-              final extra = state.extra;
-              final draft = extra is BulkOrderDraft ? extra : null;
-              return BulkOrderScreen(draft: draft);
-            },
-          ),
+          GoRoute(path: '/bulk-order', builder: (context, state) => const BulkOrderScreen()),
           GoRoute(path: '/orders', builder: (context, state) => const OrdersListScreen()),
           GoRoute(
             path: '/orders/:id',
@@ -144,7 +138,44 @@ final goRouterProvider = Provider<GoRouter>((ref) {
           ),
           GoRoute(path: '/notifications', builder: (context, state) => const NotificationsScreen()),
           GoRoute(path: '/profile', builder: (context, state) => const ProfileScreen()),
-          GoRoute(path: '/trader/share', builder: (context, state) => const ShareProductsScreen()),
+          GoRoute(
+            path: '/trader/share',
+            builder: (context, state) {
+              final extra = state.extra;
+              String? initialId;
+              List<TraderShareLine>? galleryLines;
+
+              if (extra is String && extra.trim().isNotEmpty) {
+                initialId = extra.trim();
+              } else if (extra is List) {
+                final parsed = <TraderShareLine>[];
+                for (final e in extra) {
+                  final l = TraderShareLine.tryParse(e);
+                  if (l != null) parsed.add(l);
+                }
+                if (parsed.isNotEmpty) galleryLines = parsed;
+              } else if (extra is Map) {
+                if (extra['productId'] != null) {
+                  final s = extra['productId'].toString().trim();
+                  if (s.isNotEmpty) initialId = s;
+                }
+                final sl = extra['shareLines'];
+                if (sl is List) {
+                  final parsed = <TraderShareLine>[];
+                  for (final e in sl) {
+                    final l = TraderShareLine.tryParse(e);
+                    if (l != null) parsed.add(l);
+                  }
+                  if (parsed.isNotEmpty) galleryLines = parsed;
+                }
+              }
+
+              return ShareProductsScreen(
+                initialProductId: galleryLines != null && galleryLines.isNotEmpty ? null : initialId,
+                initialGalleryLines: galleryLines,
+              );
+            },
+          ),
           GoRoute(path: '/trader/groups', builder: (context, state) => const CustomerGroupsScreen()),
           GoRoute(
             path: '/trader/groups/:groupId',
@@ -163,10 +194,14 @@ final goRouterProvider = Provider<GoRouter>((ref) {
             path: '/vendor/inbound-share',
             builder: (context, state) {
               final extra = state.extra;
-              if (extra is! VendorInboundShareArgs) {
-                return const VendorDashboardScreen();
+              if (extra is VendorInboundShareArgs) {
+                return VendorInboundShareScreen(
+                  initialPaths: extra.imagePaths,
+                  preselectedProductId: extra.preselectedProductId,
+                  preselectedProductName: extra.preselectedProductName,
+                );
               }
-              return VendorInboundShareScreen(args: extra);
+              return const VendorInboundShareScreen(initialPaths: <String>[]);
             },
           ),
           GoRoute(path: '/vendor/orders', builder: (context, state) => const VendorIncomingOrdersScreen()),

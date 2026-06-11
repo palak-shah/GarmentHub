@@ -47,4 +47,5 @@ flutter {
 
 dependencies {
     implementation("androidx.core:core-ktx:1.15.0")
+    implementation("androidx.sharetarget:sharetarget:1.2.0")
 }

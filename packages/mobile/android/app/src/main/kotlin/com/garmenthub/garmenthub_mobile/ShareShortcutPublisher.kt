@@ -2,23 +2,42 @@ package com.garmenthub.garmenthub_mobile
 
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ShortcutManager
+import android.os.Build
 import androidx.core.content.pm.ShortcutInfoCompat
 import androidx.core.content.pm.ShortcutManagerCompat
 import androidx.core.graphics.drawable.IconCompat
 
 /**
- * Publishes dynamic shortcuts so recent listings appear as direct-share rows in the system chooser.
+ * Publishes dynamic sharing shortcuts so pinned + recent listings appear as direct-share rows.
  */
 object ShareShortcutPublisher {
-    private const val MAX_SHORTCUTS = 4
     /** Shortcuts short-label limit (matches platform shortcut label caps). */
     private const val SHORT_LABEL_MAX_LEN = 10
     private const val LONG_LABEL_MAX_LEN = 25
-    /** Conversation-style category for direct-share shortcuts (AndroidX). */
-    private const val CATEGORY_CONVERSATION = "androidx.core.content.pm.shortcuts.conversation"
+
+    /** Fallback when [ShortcutManager] is unavailable (pre–API 25). */
+    private const val FALLBACK_MAX_SHORTCUTS = 0
+
+    /**
+     * Max dynamic shortcuts this activity may publish (OS limit). Used by Flutter for UI hints.
+     */
+    fun maxShortcutsForDevice(context: Context): Int {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N_MR1) {
+            return FALLBACK_MAX_SHORTCUTS
+        }
+        val sm = context.getSystemService(ShortcutManager::class.java) ?: return FALLBACK_MAX_SHORTCUTS
+        val v = sm.maxShortcutCountPerActivity
+        return if (v > 0) v else 15
+    }
 
     fun sync(context: Context, items: List<Pair<String, String>>) {
-        val trimmed = items.take(MAX_SHORTCUTS)
+        val max = maxShortcutsForDevice(context)
+        val trimmed = if (max <= 0) {
+            emptyList()
+        } else {
+            items.take(max)
+        }
         if (trimmed.isEmpty()) {
             val existing = ShortcutManagerCompat.getDynamicShortcuts(context)
             val ids = existing.map { it.id }
@@ -27,6 +46,7 @@ object ShareShortcutPublisher {
             }
             return
         }
+        val category = GarmentHubSharePlugin.SHARE_TARGET_CATEGORY
         val shortcuts = trimmed.mapIndexed { index, pair ->
             val (rawId, name) = pair
             val id = sanitizeShortcutId(rawId)
@@ -45,7 +65,7 @@ object ShareShortcutPublisher {
                 .setShortLabel(label)
                 .setLongLabel(longLabel)
                 .setIntent(intent)
-                .setCategories(setOf(CATEGORY_CONVERSATION))
+                .setCategories(setOf(category))
                 .setLongLived(true)
                 .setRank(index)
                 .setIcon(IconCompat.createWithResource(context, android.R.drawable.ic_menu_gallery))

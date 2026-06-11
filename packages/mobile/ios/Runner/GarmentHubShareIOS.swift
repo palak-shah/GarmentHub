@@ -7,6 +7,8 @@ import UIKit
 enum GarmentHubShareIOS {
   static let appGroup = "group.com.garmenthub.garmenthubMobile"
   static let channelName = "com.garmenthub/share_targets"
+  /// No public iOS API for share-row count; cap donations to avoid INInteraction churn.
+  static let maxDonationCap = 20
   static let kPaths = "gh_share_handoff_paths"
   static let kProductId = "gh_share_handoff_product_id"
   static let kProductName = "gh_share_handoff_product_name"
@@ -40,6 +42,8 @@ enum GarmentHubShareIOS {
       result(["productId": NSNull(), "productName": NSNull()])
     case "consumeIosShareHandoff":
       result(consumeHandoffMap())
+    case "getMaxShareTargets":
+      result(GarmentHubShareIOS.maxDonationCap)
     default:
       result(FlutterMethodNotImplemented)
     }
@@ -62,7 +66,7 @@ enum GarmentHubShareIOS {
   }
 
   private static func donateShareTargets(recents: [[String: Any]]) {
-    for item in recents.prefix(4) {
+    for item in recents.prefix(maxDonationCap) {
       guard let id = item["id"] as? String, !id.isEmpty else { continue }
       let name = (item["name"] as? String) ?? ""
       let phrase = INSpeakableString(spokenPhrase: name.isEmpty ? "Listing" : name)

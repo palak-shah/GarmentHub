@@ -91,6 +91,9 @@ class GarmentHubSharePlugin : FlutterPlugin, MethodChannel.MethodCallHandler, Ac
                 )
             }
             "consumeIosShareHandoff" -> result.success(null)
+            "getMaxShareTargets" -> {
+                result.success(ShareShortcutPublisher.maxShortcutsForDevice(appContext))
+            }
             else -> result.notImplemented()
         }
     }
@@ -99,5 +102,7 @@ class GarmentHubSharePlugin : FlutterPlugin, MethodChannel.MethodCallHandler, Ac
         const val CHANNEL = "com.garmenthub/share_targets"
         const val EXTRA_PRODUCT_ID = "com.garmenthub.garmenthub_mobile.EXTRA_PRODUCT_ID"
         const val EXTRA_PRODUCT_NAME = "com.garmenthub.garmenthub_mobile.EXTRA_PRODUCT_NAME"
+        /** Must match `<category>` in `res/xml/gh_share_targets.xml` for Sharing Shortcuts. */
+        const val SHARE_TARGET_CATEGORY = "com.garmenthub.garmenthub_mobile.category.IMAGE_SHARE_TARGET"
     }
 }

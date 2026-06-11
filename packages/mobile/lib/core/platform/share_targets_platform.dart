@@ -9,17 +9,28 @@ class ShareTargetsPlatform {
 
   static const _channel = MethodChannel('com.garmenthub/share_targets');
 
-  /// Push MRU to Android shortcuts / donate iOS intents (capped on native side).
+  /// Push pins + MRU to Android shortcuts / donate iOS intents (trimmed on native side).
   static Future<void> syncRecentTargets(List<({String id, String name})> recents) async {
     if (kIsWeb) return;
     if (!Platform.isAndroid && !Platform.isIOS) return;
-    final list = recents
-        .take(8)
-        .map((e) => <String, String>{'id': e.id, 'name': e.name})
-        .toList();
+    final list = recents.map((e) => <String, String>{'id': e.id, 'name': e.name}).toList();
     try {
       await _channel.invokeMethod<void>('syncShareTargets', list);
     } catch (_) {}
+  }
+
+  /// Android: [ShortcutManager.getMaxShortcutCountPerActivity]. iOS: conservative donation cap (no public API).
+  static Future<int?> getMaxShareTargetsForDevice() async {
+    if (kIsWeb) return null;
+    if (!Platform.isAndroid && !Platform.isIOS) return null;
+    try {
+      final raw = await _channel.invokeMethod<dynamic>('getMaxShareTargets');
+      if (raw is int) return raw;
+      if (raw is num) return raw.toInt();
+      return null;
+    } catch (_) {
+      return null;
+    }
   }
 
   static Future<void> clearOsShareTargets() async {

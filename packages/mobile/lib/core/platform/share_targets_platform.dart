@@ -41,21 +41,92 @@ class ShareTargetsPlatform {
     } catch (_) {}
   }
 
+  /// Android: read listing extras from the current share intent without clearing them.
+  /// Call [consumeShareProductExtra] after routing so the next share does not reuse stale extras.
+  ///
+  /// [resolvedSource] is `extras`, `uri`, `cache`, or `none` from native resolution (missing on old APKs).
+  static Future<
+      ({
+        String? productId,
+        String? productName,
+        String? resolvedSource,
+        String? intentDataPreview,
+      })> peekShareProductExtra() async {
+    if (kIsWeb || !Platform.isAndroid) {
+      return (
+        productId: null,
+        productName: null,
+        resolvedSource: null,
+        intentDataPreview: null,
+      );
+    }
+    try {
+      final raw = await _channel.invokeMethod<Map<dynamic, dynamic>>('peekShareProductExtra');
+      return _parseShareProductExtraMap(raw);
+    } catch (_) {
+      return (
+        productId: null,
+        productName: null,
+        resolvedSource: null,
+        intentDataPreview: null,
+      );
+    }
+  }
+
   /// Android: extras on the same ACTION_SEND intent as shared media. Consume-once.
-  static Future<({String? productId, String? productName})> consumeShareProductExtra() async {
-    if (kIsWeb || !Platform.isAndroid) return (productId: null, productName: null);
+  static Future<
+      ({
+        String? productId,
+        String? productName,
+        String? resolvedSource,
+        String? intentDataPreview,
+      })> consumeShareProductExtra() async {
+    if (kIsWeb || !Platform.isAndroid) {
+      return (
+        productId: null,
+        productName: null,
+        resolvedSource: null,
+        intentDataPreview: null,
+      );
+    }
     try {
       final raw = await _channel.invokeMethod<Map<dynamic, dynamic>>('consumeShareProductExtra');
-      if (raw == null) return (productId: null, productName: null);
-      final id = raw['productId']?.toString().trim();
-      final name = raw['productName']?.toString().trim();
-      return (
-        productId: id?.isEmpty ?? true ? null : id,
-        productName: name?.isEmpty ?? true ? null : name,
-      );
+      return _parseShareProductExtraMap(raw);
     } catch (_) {
-      return (productId: null, productName: null);
+      return (
+        productId: null,
+        productName: null,
+        resolvedSource: null,
+        intentDataPreview: null,
+      );
     }
+  }
+
+  static ({
+    String? productId,
+    String? productName,
+    String? resolvedSource,
+    String? intentDataPreview,
+  }) _parseShareProductExtraMap(Map<dynamic, dynamic>? raw) {
+    if (raw == null) {
+      return (
+        productId: null,
+        productName: null,
+        resolvedSource: null,
+        intentDataPreview: null,
+      );
+    }
+    final id = raw['productId']?.toString().trim();
+    final name = raw['productName']?.toString().trim();
+    final src = raw['resolvedSource']?.toString().trim();
+    final previewRaw = raw['intentDataPreview']?.toString();
+    final preview = (previewRaw == null || previewRaw.isEmpty) ? null : previewRaw;
+    return (
+      productId: id?.isEmpty ?? true ? null : id,
+      productName: name?.isEmpty ?? true ? null : name,
+      resolvedSource: src?.isEmpty ?? true ? null : src,
+      intentDataPreview: preview,
+    );
   }
 
   /// iOS: share extension staged paths in App Group + opened `garmenthub://` handoff. Consume-once.

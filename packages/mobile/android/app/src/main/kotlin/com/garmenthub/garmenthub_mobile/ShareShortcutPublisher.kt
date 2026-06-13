@@ -3,10 +3,12 @@ package com.garmenthub.garmenthub_mobile
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ShortcutManager
+import android.net.Uri
 import android.os.Build
 import androidx.core.content.pm.ShortcutInfoCompat
 import androidx.core.content.pm.ShortcutManagerCompat
 import androidx.core.graphics.drawable.IconCompat
+import com.garmenthub.garmenthub_mobile.BuildConfig
 
 /**
  * Publishes dynamic sharing shortcuts so pinned + recent listings appear as direct-share rows.
@@ -52,7 +54,14 @@ object ShareShortcutPublisher {
             val id = sanitizeShortcutId(rawId)
             val intent = Intent(Intent.ACTION_SEND).apply {
                 component = android.content.ComponentName(context, MainActivity::class.java)
-                type = "image/*"
+                val listingUri = Uri.Builder()
+                    .scheme(GarmentHubSharePlugin.SHARE_PRODUCT_URI_SCHEME)
+                    .authority(GarmentHubSharePlugin.SHARE_PRODUCT_URI_HOST)
+                    .appendPath("product")
+                    .appendPath(rawId)
+                    .appendQueryParameter("productName", name)
+                    .build()
+                setDataAndType(listingUri, "image/*")
                 putExtra(GarmentHubSharePlugin.EXTRA_PRODUCT_ID, rawId)
                 putExtra(GarmentHubSharePlugin.EXTRA_PRODUCT_NAME, name)
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or
@@ -72,6 +81,10 @@ object ShareShortcutPublisher {
                 .build()
         }
         try {
+            if (BuildConfig.DEBUG && shortcuts.isNotEmpty()) {
+                GhShareLog.logIntent("ShareShortcutPublisher.sync FIRST shortcut template", shortcuts[0].intent)
+                GhShareLog.d("ShareShortcutPublisher.sync publishedCount=${shortcuts.size}")
+            }
             ShortcutManagerCompat.setDynamicShortcuts(context, shortcuts)
         } catch (_: Exception) {
             // Rate limits / OEM restrictions

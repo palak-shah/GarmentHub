@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -6,10 +5,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/api/api_providers.dart';
+import '../../../core/debug/share_debug_log.dart';
 import '../../../core/network/api_error.dart';
 import '../../../shared/models/product.dart';
 import '../../../shared/models/user.dart';
 import '../domain/vendor_share_prefs.dart';
+import '../domain/vendor_share_upload.dart';
 import '../vendor_providers.dart';
 
 /// Adds images shared from another app (e.g. WhatsApp) into the vendor catalog.
@@ -41,54 +42,57 @@ class _VendorInboundShareScreenState extends ConsumerState<VendorInboundShareScr
   void initState() {
     super.initState();
     _paths = List.from(widget.initialPaths);
+    ShareDebugLog.log(
+      'VendorInboundShareScreen init preselectedProductId=${widget.preselectedProductId ?? "(null)"} '
+      'preselectedProductName=${widget.preselectedProductName ?? "(null)"} initialPaths=${widget.initialPaths.length}',
+    );
     _bootstrap();
   }
 
   Future<void> _bootstrap() async {
     if (_paths.isEmpty) {
-      final fromPrefs = await VendorSharePrefs.readPendingSharePaths();
+      final fromPrefs = await VendorSharePrefs.readPendingShareContext();
       await VendorSharePrefs.clearPendingSharePaths();
-      _paths = fromPrefs;
+      _paths = List.from(fromPrefs.paths);
     }
-    _recentListings = await VendorSharePrefs.getRecentProducts();
+    _recentListings = await VendorSharePrefs.getOrderedShareTargetsForSync();
     if (mounted) setState(() => _resolvingPaths = false);
-
     final preId = widget.preselectedProductId?.trim();
-    if (preId != null && preId.isNotEmpty && _paths.isNotEmpty) {
-      String? fromRecent;
-      for (final e in _recentListings) {
-        if (e.id == preId) {
-          fromRecent = e.name;
-          break;
-        }
-      }
-      final name = (widget.preselectedProductName?.trim().isNotEmpty ?? false)
-          ? widget.preselectedProductName!.trim()
-          : (fromRecent ?? 'Listing');
-      WidgetsBinding.instance.addPostFrameCallback((_) {
+    final willAuto = preId != null && preId.isNotEmpty && _paths.isNotEmpty;
+    if (preId != null && preId.isNotEmpty) {
+      ShareDebugLog.log(
+        'F: inbound loaded with preselectedProductId=$preId paths=${_paths.length} willScheduleAutoUpload=$willAuto',
+      );
+    } else {
+      ShareDebugLog.log('VendorInboundShareScreen bootstrap paths=${_paths.length} (no preselected id)');
+    }
+    if (willAuto) {
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
         if (!mounted) return;
-        unawaited(_uploadToProduct(preId, name));
+        ShareDebugLog.log('F: auto-upload callback starting preId=$preId');
+        final rawName = widget.preselectedProductName?.trim();
+        final name = (rawName != null && rawName.isNotEmpty) ? rawName : 'Listing';
+        await _uploadToProduct(preId, name);
       });
     }
   }
 
   Future<void> _uploadToProduct(String productId, String productName) async {
-    final existing = _paths.where((p) => File(p).existsSync()).toList();
-    if (existing.isEmpty) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No valid image files')));
-      }
-      return;
-    }
     setState(() => _uploading = true);
     try {
-      await ref.read(uploadApiProvider).postProductImages(existing, productId: productId);
-      await VendorSharePrefs.setLastProduct(id: productId, name: productName);
-      ref.invalidate(vendorProductsProvider);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Added to $productName')));
-        context.go('/vendor/products/$productId/edit');
+      final ok = await uploadSharedImagesToProduct(
+        ref,
+        paths: _paths,
+        productId: productId,
+        productName: productName,
+      );
+      if (!mounted) return;
+      if (!ok) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No valid image files')));
+        return;
       }
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Added to $productName')));
+      context.go('/vendor/products/$productId/edit');
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(apiErrorMessage(e))));
@@ -240,12 +244,12 @@ class _VendorInboundShareScreenState extends ConsumerState<VendorInboundShareScr
           const SizedBox(height: 24),
           if (hasRecents) ...[
             Text(
-              'Recent listings',
+              'Your listings',
               style: text.titleSmall?.copyWith(fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 4),
             Text(
-              'Tap a listing to add these photos there. The top one is the listing you used most recently.',
+              'Pinned listings appear first, then recent. Tap to add these photos there.',
               style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
             ),
             const SizedBox(height: 12),
@@ -260,7 +264,7 @@ class _VendorInboundShareScreenState extends ConsumerState<VendorInboundShareScr
                     onPressed: _uploading ? null : () => _uploadToProduct(e.id, e.name),
                     icon: const Icon(Icons.inventory_2_outlined),
                     label: Text(
-                      isLatest ? 'Add to ${e.name} (latest)' : 'Add to ${e.name}',
+                      isLatest ? 'Add to ${e.name} (first in list)' : 'Add to ${e.name}',
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -282,7 +286,7 @@ class _VendorInboundShareScreenState extends ConsumerState<VendorInboundShareScr
           const SizedBox(height: 24),
           Text(
             'GarmentHub appears in the system share sheet after you share from Photos or Files. '
-            'Recent listings are updated when you open a product or upload from the app.',
+            'Pin listings from My products for quick share targets; recents update when you open or upload to a product.',
             style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
           ),
         ],

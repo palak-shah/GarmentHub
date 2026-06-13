@@ -14,6 +14,8 @@ class VendorSharePrefs {
   static const _lastProductId = 'vendor_last_product_id';
   static const _lastProductName = 'vendor_last_product_name';
   static const _pendingPaths = 'vendor_pending_share_paths_json';
+  static const _pendingShareProductIdKey = 'vendor_pending_share_product_id';
+  static const _pendingShareProductNameKey = 'vendor_pending_share_product_name';
   static const _recentProductsKey = 'vendor_recent_products_json';
   static const _pinnedForShareKey = 'vendor_pinned_share_products_json';
   static const _maxRecent = 8;
@@ -159,26 +161,64 @@ class VendorSharePrefs {
     await syncOsShareTargets();
   }
 
+  /// Persists image paths for a share received before vendor session was ready.
+  /// Optionally persists [productId] / [productName] from a direct-share shortcut.
   static Future<void> savePendingSharePaths(List<String> paths) async {
+    await savePendingSharePathsWithProduct(paths);
+  }
+
+  static Future<void> savePendingSharePathsWithProduct(
+    List<String> paths, {
+    String? productId,
+    String? productName,
+  }) async {
     final p = await SharedPreferences.getInstance();
     await p.setString(_pendingPaths, jsonEncode(paths));
+    final pid = productId?.trim();
+    if (pid != null && pid.isNotEmpty) {
+      await p.setString(_pendingShareProductIdKey, pid);
+      final pn = productName?.trim();
+      if (pn != null && pn.isNotEmpty) {
+        await p.setString(_pendingShareProductNameKey, pn);
+      } else {
+        await p.remove(_pendingShareProductNameKey);
+      }
+    } else {
+      await p.remove(_pendingShareProductIdKey);
+      await p.remove(_pendingShareProductNameKey);
+    }
+  }
+
+  static Future<({List<String> paths, String? productId, String? productName})> readPendingShareContext() async {
+    final p = await SharedPreferences.getInstance();
+    final raw = p.getString(_pendingPaths);
+    List<String> paths = [];
+    if (raw != null && raw.isNotEmpty) {
+      try {
+        final list = jsonDecode(raw);
+        if (list is List) {
+          paths = list.map((e) => e.toString()).where((s) => s.isNotEmpty).toList();
+        }
+      } catch (_) {}
+    }
+    final id = p.getString(_pendingShareProductIdKey)?.trim();
+    final name = p.getString(_pendingShareProductNameKey);
+    return (
+      paths: paths,
+      productId: (id != null && id.isNotEmpty) ? id : null,
+      productName: (name != null && name.trim().isNotEmpty) ? name.trim() : null,
+    );
   }
 
   static Future<List<String>> readPendingSharePaths() async {
-    final p = await SharedPreferences.getInstance();
-    final raw = p.getString(_pendingPaths);
-    if (raw == null || raw.isEmpty) return [];
-    try {
-      final list = jsonDecode(raw);
-      if (list is! List) return [];
-      return list.map((e) => e.toString()).where((s) => s.isNotEmpty).toList();
-    } catch (_) {
-      return [];
-    }
+    final ctx = await readPendingShareContext();
+    return ctx.paths;
   }
 
   static Future<void> clearPendingSharePaths() async {
     final p = await SharedPreferences.getInstance();
     await p.remove(_pendingPaths);
+    await p.remove(_pendingShareProductIdKey);
+    await p.remove(_pendingShareProductNameKey);
   }
 }

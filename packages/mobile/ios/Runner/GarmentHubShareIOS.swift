@@ -39,7 +39,19 @@ enum GarmentHubShareIOS {
       donateShareTargets(recents: list)
       result(nil)
     case "consumeShareProductExtra":
-      result(["productId": NSNull(), "productName": NSNull()])
+      result([
+        "productId": NSNull(),
+        "productName": NSNull(),
+        "resolvedSource": NSNull(),
+        "intentDataPreview": NSNull(),
+      ])
+    case "peekShareProductExtra":
+      result([
+        "productId": NSNull(),
+        "productName": NSNull(),
+        "resolvedSource": NSNull(),
+        "intentDataPreview": NSNull(),
+      ])
     case "consumeIosShareHandoff":
       result(consumeHandoffMap())
     case "getMaxShareTargets":

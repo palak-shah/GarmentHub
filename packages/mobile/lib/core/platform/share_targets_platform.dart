@@ -44,7 +44,7 @@ class ShareTargetsPlatform {
   /// Android: read listing extras from the current share intent without clearing them.
   /// Call [consumeShareProductExtra] after routing so the next share does not reuse stale extras.
   ///
-  /// [resolvedSource] is `extras`, `uri`, `cache`, or `none` from native resolution (missing on old APKs).
+  /// [resolvedSource] is `extra`, `uri`, `shortcutId`, `cache`, or `none` from native resolution (missing on old APKs).
   static Future<
       ({
         String? productId,

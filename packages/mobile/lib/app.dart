@@ -26,8 +26,13 @@ class GarmentHubApp extends ConsumerStatefulWidget {
 }
 
 class _GarmentHubAppState extends ConsumerState<GarmentHubApp> with WidgetsBindingObserver {
+  static const _androidShareDedupeWindow = Duration(milliseconds: 850);
+
   final GlobalKey<ScaffoldMessengerState> _rootMessengerKey = GlobalKey<ScaffoldMessengerState>();
   StreamSubscription<List<SharedMediaFile>>? _shareSub;
+
+  String? _lastAndroidShareDedupeSig;
+  DateTime? _lastAndroidShareDedupeAt;
 
   void _shareDebug(String message) => ShareDebugLog.log(message);
 
@@ -35,6 +40,27 @@ class _GarmentHubAppState extends ConsumerState<GarmentHubApp> with WidgetsBindi
     final normalized = filePath.replaceAll(r'\', '/');
     final i = normalized.lastIndexOf('/');
     return i < 0 ? normalized : normalized.substring(i + 1);
+  }
+
+  /// Dedupe key: peek [productId] + sorted paths (immediate duplicate deliveries from the platform).
+  String _androidShareDedupeSignature(String? productId, List<String> paths) {
+    final sorted = List<String>.from(paths)..sort();
+    return '${productId ?? ''}\x00${sorted.join('\x00')}';
+  }
+
+  bool _shouldSkipDuplicateAndroidShare(String signature) {
+    final now = DateTime.now();
+    if (_lastAndroidShareDedupeSig == signature &&
+        _lastAndroidShareDedupeAt != null &&
+        now.difference(_lastAndroidShareDedupeAt!) < _androidShareDedupeWindow) {
+      ShareDebugLog.log(
+        '_handleShareFiles DEDUPE identical productId+paths within ${_androidShareDedupeWindow.inMilliseconds}ms',
+      );
+      return true;
+    }
+    _lastAndroidShareDedupeSig = signature;
+    _lastAndroidShareDedupeAt = now;
+    return false;
   }
 
   void _logNavigateInboundShare(String reasonCode, String detail) {
@@ -290,6 +316,10 @@ class _GarmentHubAppState extends ConsumerState<GarmentHubApp> with WidgetsBindi
           );
         }
       }
+    }
+    if (Platform.isAndroid && paths.isNotEmpty) {
+      final sig = _androidShareDedupeSignature(extra.productId, paths);
+      if (_shouldSkipDuplicateAndroidShare(sig)) return;
     }
     await _goInbound(
       paths: paths,

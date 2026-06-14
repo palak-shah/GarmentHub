@@ -46,12 +46,13 @@ object ShareShortcutPublisher {
             if (ids.isNotEmpty()) {
                 ShortcutManagerCompat.removeDynamicShortcuts(context, ids)
             }
+            ShareShortcutIdRegistry.clear(context)
             return
         }
         val category = GarmentHubSharePlugin.SHARE_TARGET_CATEGORY
         val shortcuts = trimmed.mapIndexed { index, pair ->
             val (rawId, name) = pair
-            val id = sanitizeShortcutId(rawId)
+            val id = ShareShortcutIdRegistry.sanitizeShortcutIdSegment(rawId)
             val intent = Intent(Intent.ACTION_SEND).apply {
                 component = android.content.ComponentName(context, MainActivity::class.java)
                 val listingUri = Uri.Builder()
@@ -86,11 +87,9 @@ object ShareShortcutPublisher {
                 GhShareLog.d("ShareShortcutPublisher.sync publishedCount=${shortcuts.size}")
             }
             ShortcutManagerCompat.setDynamicShortcuts(context, shortcuts)
+            ShareShortcutIdRegistry.replaceAll(context, trimmed)
         } catch (_: Exception) {
             // Rate limits / OEM restrictions
         }
     }
-
-    private fun sanitizeShortcutId(raw: String): String =
-        raw.replace(Regex("[^a-zA-Z0-9_-]"), "_").take(64)
 }

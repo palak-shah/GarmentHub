@@ -21,10 +21,12 @@ object GhShareLog {
         val keys = extras?.keySet()?.sorted()?.joinToString(",") ?: "(no extras bundle)"
         val pid = intent.getStringExtra(GarmentHubSharePlugin.EXTRA_PRODUCT_ID)
         val pname = intent.getStringExtra(GarmentHubSharePlugin.EXTRA_PRODUCT_NAME)
+        val shortcutId = intent.getStringExtra(Intent.EXTRA_SHORTCUT_ID)
         Log.d(
             TAG,
             "$label action=${intent.action} type=${intent.type} component=${intent.component} extraKeys=$keys " +
-                "EXTRA_PRODUCT_ID=${pid ?: "(null)"} EXTRA_PRODUCT_NAME=${pname ?: "(null)"}",
+                "EXTRA_PRODUCT_ID=${pid ?: "(null)"} EXTRA_PRODUCT_NAME=${pname ?: "(null)"} " +
+                "EXTRA_SHORTCUT_ID=${shortcutId ?: "(null)"}",
         )
     }
 
@@ -52,9 +54,11 @@ object GhShareLog {
         val dataString = intent.dataString ?: "(null)"
         val extras = intent.extras
         val keys = extras?.keySet()?.sorted()?.joinToString(",") ?: "(no extras bundle)"
+        val shortcutId = intent.getStringExtra(Intent.EXTRA_SHORTCUT_ID)
         Log.d(
             TAG,
             "SHARE_RECEIVE action=$action dataString=$dataString extraKeys=$keys " +
+                "EXTRA_SHORTCUT_ID=${shortcutId ?: "(null)"} " +
                 "resolvedSource=$resolvedSource productId=${resolvedProductId ?: "(null)"} " +
                 "productName=${resolvedProductName ?: "(null)"}",
         )

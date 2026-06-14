@@ -25,6 +25,7 @@ class GarmentHubSharePlugin : FlutterPlugin, MethodChannel.MethodCallHandler, Ac
 
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         appContext = binding.applicationContext
+        appContextForRegistry = binding.applicationContext
         channel = MethodChannel(binding.binaryMessenger, CHANNEL)
         channel.setMethodCallHandler(this)
     }
@@ -62,7 +63,8 @@ class GarmentHubSharePlugin : FlutterPlugin, MethodChannel.MethodCallHandler, Ac
     private fun captureFromIntent(intent: Intent?) {
         GhShareLog.logIntent("GarmentHubSharePlugin.captureFromIntent", intent)
         if (intent == null) return
-        val resolved = resolveListingFromIntentWithCache(intent)
+        val resolved = resolveWithCache(intent)
+        lastResolvedShareListing = resolved
         pendingProductId = resolved.productId
         pendingProductName = resolved.productName
         GhShareLog.logShareReceive(intent, resolved.source, resolved.productId, resolved.productName)
@@ -86,11 +88,6 @@ class GarmentHubSharePlugin : FlutterPlugin, MethodChannel.MethodCallHandler, Ac
             }
             "peekShareProductExtra" -> {
                 GhShareLog.logIntent("peekShareProductExtra BEFORE capture activity.intent", activity?.intent)
-                val peekResolved = resolveListingFromIntentWithCache(activity?.intent)
-                GhShareLog.d(
-                    "peekShareProductExtra activity.intent resolvedSource=${peekResolved.source} " +
-                        "id=${peekResolved.productId ?: "(null)"}",
-                )
                 activity?.intent?.let { captureFromIntent(it) }
                 val id = pendingProductId ?: cachedShareProductId
                 val name = pendingProductName ?: cachedShareProductName
@@ -100,38 +97,45 @@ class GarmentHubSharePlugin : FlutterPlugin, MethodChannel.MethodCallHandler, Ac
                         "returnId=${id ?: "(null)"} returnName=${name ?: "(null)"}",
                 )
                 val diagIntent = activity?.intent
-                val diagResolved = resolveListingFromIntentWithCache(diagIntent)
+                val resolvedSource = if (diagIntent != null) {
+                    lastResolvedShareListing?.source ?: "none"
+                } else {
+                    "none"
+                }
                 val dataPreview = diagIntent?.dataString?.take(200)
                 result.success(
                     mapOf(
                         "productId" to id,
                         "productName" to name,
-                        "resolvedSource" to diagResolved.source,
+                        "resolvedSource" to resolvedSource,
                         "intentDataPreview" to dataPreview,
                     ),
                 )
             }
             "consumeShareProductExtra" -> {
                 GhShareLog.logIntent("consumeShareProductExtra BEFORE capture activity.intent", activity?.intent)
-                // Re-sync from the live activity intent so extras aren't missed vs Flutter init order.
                 activity?.intent?.let { captureFromIntent(it) }
                 val id = pendingProductId ?: cachedShareProductId
                 val name = pendingProductName ?: cachedShareProductName
+                val resolvedSource = if (activity?.intent != null) {
+                    lastResolvedShareListing?.source ?: "none"
+                } else {
+                    "none"
+                }
+                val dataPreview = activity?.intent?.dataString?.take(200)
                 GhShareLog.d(
                     "consumeShareProductExtra returning id=${id ?: "(null)"} name=${name ?: "(null)"} then clearing pending+cache",
                 )
-                val diagIntent = activity?.intent
-                val diagResolved = resolveListingFromIntentWithCache(diagIntent)
-                val dataPreview = diagIntent?.dataString?.take(200)
                 pendingProductId = null
                 pendingProductName = null
                 cachedShareProductId = null
                 cachedShareProductName = null
+                lastResolvedShareListing = null
                 result.success(
                     mapOf(
                         "productId" to id,
                         "productName" to name,
-                        "resolvedSource" to diagResolved.source,
+                        "resolvedSource" to resolvedSource,
                         "intentDataPreview" to dataPreview,
                     ),
                 )
@@ -165,6 +169,14 @@ class GarmentHubSharePlugin : FlutterPlugin, MethodChannel.MethodCallHandler, Ac
         const val SHARE_LISTING_URI_SCHEME = "garmenthub-share"
         const val SHARE_LISTING_URI_HOST = "direct-listing"
 
+        /** Application context for shortcut-id registry lookup (set in [onAttachedToEngine]). */
+        @Volatile
+        private var appContextForRegistry: Context? = null
+
+        /** Last full resolution ([resolveWithCache]) from [captureFromIntent]; used for Flutter `resolvedSource`. */
+        @Volatile
+        private var lastResolvedShareListing: ResolvedShareListing? = null
+
         /** Survives intent mutation before Flutter reads extras (e.g. receive_sharing_intent). */
         @Volatile
         private var cachedShareProductId: String? = null
@@ -173,35 +185,51 @@ class GarmentHubSharePlugin : FlutterPlugin, MethodChannel.MethodCallHandler, Ac
         private var cachedShareProductName: String? = null
 
         /**
-         * Intent-only: [EXTRA_PRODUCT_ID], then `garmenthub://share/product/{id}`, then legacy `garmenthub-share` query URI.
-         * Source is `extras`, `uri`, or `none` (never `cache` — use [resolveListingFromIntentWithCache] for full order).
+         * Strict intent-only ladder: **extra** → **uri** → **shortcutId** → **none**.
+         * Stops at first non-empty [productId]. Does not read [cachedShareProductId].
          */
-        private fun parseListingFromIntent(intent: Intent?): ResolvedShareListing {
+        private fun resolveIntentOnly(intent: Intent?, lookupContext: Context?): ResolvedShareListing {
             if (intent == null) return ResolvedShareListing(null, null, "none")
             val extraId = intent.getStringExtra(EXTRA_PRODUCT_ID)?.trim().orEmpty()
             val extraName = intent.getStringExtra(EXTRA_PRODUCT_NAME)
             if (extraId.isNotEmpty()) {
-                return ResolvedShareListing(extraId, extraName, "extras")
+                return ResolvedShareListing(extraId, extraName, "extra")
             }
-            val uri = intent.data ?: return ResolvedShareListing(null, null, "none")
-
-            if (SHARE_PRODUCT_URI_SCHEME == uri.scheme && SHARE_PRODUCT_URI_HOST == uri.host) {
-                val segments = uri.pathSegments
-                val p = segments.indexOf("product")
-                if (p >= 0 && p + 1 < segments.size) {
-                    val pathId = segments[p + 1].trim()
-                    if (pathId.isNotEmpty()) {
-                        val qName = uri.getQueryParameter("productName")
-                        return ResolvedShareListing(pathId, qName, "uri")
+            val uri = intent.data
+            if (uri != null) {
+                if (SHARE_PRODUCT_URI_SCHEME == uri.scheme && SHARE_PRODUCT_URI_HOST == uri.host) {
+                    val segments = uri.pathSegments
+                    val p = segments.indexOf("product")
+                    if (p >= 0 && p + 1 < segments.size) {
+                        val pathId = segments[p + 1].trim()
+                        if (pathId.isNotEmpty()) {
+                            val qName = uri.getQueryParameter("productName")
+                            return ResolvedShareListing(pathId, qName, "uri")
+                        }
+                    }
+                }
+                if (SHARE_LISTING_URI_SCHEME == uri.scheme && SHARE_LISTING_URI_HOST == uri.host) {
+                    val qId = uri.getQueryParameter("productId")?.trim().orEmpty()
+                    val qName = uri.getQueryParameter("productName")
+                    if (qId.isNotEmpty()) {
+                        return ResolvedShareListing(qId, qName, "uri")
                     }
                 }
             }
 
-            if (SHARE_LISTING_URI_SCHEME == uri.scheme && SHARE_LISTING_URI_HOST == uri.host) {
-                val qId = uri.getQueryParameter("productId")?.trim().orEmpty()
-                val qName = uri.getQueryParameter("productName")
-                if (qId.isNotEmpty()) {
-                    return ResolvedShareListing(qId, qName, "uri")
+            val shortcutId = intent.getStringExtra(Intent.EXTRA_SHORTCUT_ID)?.trim().orEmpty()
+            if (shortcutId.isNotEmpty()) {
+                val ctx = lookupContext?.applicationContext
+                if (ctx != null) {
+                    ShareShortcutIdRegistry.lookup(ctx, shortcutId)?.let { (pid, pname) ->
+                        return ResolvedShareListing(pid, pname, "shortcutId")
+                    }
+                }
+                if (shortcutId.startsWith("share_product_")) {
+                    val suffix = shortcutId.removePrefix("share_product_").trim()
+                    if (suffix.isNotEmpty()) {
+                        return ResolvedShareListing(suffix, null, "shortcutId")
+                    }
                 }
             }
 
@@ -209,11 +237,11 @@ class GarmentHubSharePlugin : FlutterPlugin, MethodChannel.MethodCallHandler, Ac
         }
 
         /**
-         * Full resolution order: extras, URI (new or legacy), then [cachedShareProductId].
-         * Log source: `extras`, `uri`, `cache`, or `none`.
+         * Full ladder: [resolveIntentOnly], then [cachedShareProductId] if still no id.
+         * Canonical [ResolvedShareListing.source]: `extra`, `uri`, `shortcutId`, `cache`, or `none`.
          */
-        private fun resolveListingFromIntentWithCache(intent: Intent?): ResolvedShareListing {
-            val fromIntent = parseListingFromIntent(intent)
+        private fun resolveWithCache(intent: Intent?): ResolvedShareListing {
+            val fromIntent = resolveIntentOnly(intent, appContextForRegistry)
             val id = fromIntent.productId?.trim().orEmpty()
             if (id.isNotEmpty()) return fromIntent
             val cId = cachedShareProductId?.trim().orEmpty()
@@ -228,7 +256,7 @@ class GarmentHubSharePlugin : FlutterPlugin, MethodChannel.MethodCallHandler, Ac
          * so listing extras are preserved if the embedding replaces the activity intent.
          */
         @JvmStatic
-        fun cacheShareExtrasFromIntent(intent: Intent?) {
+        fun cacheShareExtrasFromIntent(context: Context?, intent: Intent?) {
             if (intent == null) {
                 GhShareLog.d("cacheShareExtrasFromIntent intent=null → skip")
                 return
@@ -241,7 +269,8 @@ class GarmentHubSharePlugin : FlutterPlugin, MethodChannel.MethodCallHandler, Ac
                 GhShareLog.d("cacheShareExtrasFromIntent action=$action not SEND → skip")
                 return
             }
-            val fromIntent = parseListingFromIntent(intent)
+            val lookupCtx = context?.applicationContext
+            val fromIntent = resolveIntentOnly(intent, lookupCtx)
             GhShareLog.logShareReceive(intent, fromIntent.source, fromIntent.productId, fromIntent.productName)
             GhShareLog.logIntent("cacheShareExtrasFromIntent candidate", intent)
             val type = intent.type
@@ -252,7 +281,9 @@ class GarmentHubSharePlugin : FlutterPlugin, MethodChannel.MethodCallHandler, Ac
                 "cacheShareExtrasFromIntent hasImageType=$hasImageType resolvedSource=${fromIntent.source} pidLen=${pid.length}",
             )
             if (!hasImageType && pid.isEmpty()) {
-                GhShareLog.d("cacheShareExtrasFromIntent → SKIP (not image type and no listing id from extras/uri)")
+                GhShareLog.d(
+                    "cacheShareExtrasFromIntent → SKIP (not image type and no listing id from extra/uri/shortcutId)",
+                )
                 return
             }
             if (pid.isNotEmpty()) {
@@ -271,6 +302,6 @@ class GarmentHubSharePlugin : FlutterPlugin, MethodChannel.MethodCallHandler, Ac
 private data class ResolvedShareListing(
     val productId: String?,
     val productName: String?,
-    /** `extras`, `uri`, `cache`, or `none` (cache/none only from [GarmentHubSharePlugin] merge path). */
+    /** `extra`, `uri`, `shortcutId`, `cache`, or `none`. */
     val source: String,
 )
